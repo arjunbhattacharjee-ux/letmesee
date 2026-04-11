@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>AR Places</title>
+<style>
+  :root {
+    --neon: #00ff88;
+    --neon-dim: #00ff8844;
+    --neon-mid: #00ff8899;
+    --bg: #000000;
+    --card-bg: rgba(0,0,0,0.72);
+    --card-border: rgba(0,255,136,0.35);
+    --font: 'Courier New', Courier, monospace;
+    --danger: #ff4466;
+    --amber: #ffaa00;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+  body { background: var(--bg); color: var(--neon); font-family: var(--font); overflow: hidden; width: 100vw; height: 100dvh; position: fixed; }
+
+  /* ── SCREENS ── */
+  .screen { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; transition: opacity 0.4s; }
+  .screen.hidden { opacity: 0; pointer-events: none; }
+
+  /* Permission screen */
+  #perm-screen { background: #000; gap: 28px; padding: 32px; }
+  .perm-logo { font-size: 13px; letter-spacing: 6px; color: var(--neon); border: 1px solid var(--neon); padding: 8px 20px; margin-bottom: 8px; }
+  .perm-title { font-size: 22px; letter-spacing: 2px; text-align: center; line-height: 1.4; }
+  .perm-sub { font-size: 11px; color: #888; letter-spacing: 1px; text-align: center; line-height: 1.8; max-width: 280px; }
+  .perm-items { display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 300px; }
+  .perm-item { display: flex; align-items: center; gap: 12px; border: 1px solid #222; padding: 14px 16px; font-size: 12px; letter-spacing: 1px; }
+  .perm-item-icon { font-size: 18px; width: 28px; text-align: center; }
+  .perm-item-text { flex: 1; }
+  .perm-item-text span { display: block; font-size: 10px; color: #666; margin-top: 2px; letter-spacing: 0; }
+  .btn-start { background: var(--neon); color: #000; border: none; padding: 16px 48px; font-family: var(--font); font-size: 13px; letter-spacing: 4px; font-weight: bold; cursor: pointer; width: 100%; max-width: 300px; margin-top: 8px; transition: opacity 0.2s; }
+  .btn-start:active { opacity: 0.7; }
+  .btn-demo { background: transparent; color: #555; border: 1px solid #333; padding: 12px 48px; font-family: var(--font); font-size: 11px; letter-spacing: 2px; cursor: pointer; width: 100%; max-width: 300px; }
+
+  /* Loading screen */
+  #load-screen { background: #000; gap: 20px; }
+  .load-ring { width: 80px; height: 80px; border: 1px solid #1a1a1a; border-top: 1px solid var(--neon); border-radius: 50%; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .load-label { font-size: 10px; letter-spacing: 4px; color: #555; }
+  .load-msg { font-size: 12px; letter-spacing: 2px; color: var(--neon); min-height: 18px; }
+  .progress-bar { width: 200px; height: 2px; background: #111; position: relative; overflow: hidden; }
+  .progress-fill { height: 100%; background: var(--neon); width: 0%; transition: width 0.3s ease; }
+
+  /* ── AR VIEW ── */
+  #ar-view { position: fixed; inset: 0; }
+  #camera { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  #demo-bg { position: absolute; inset: 0; background: linear-gradient(135deg, #0a0a0a 0%, #0d1a0d 40%, #0a0f0a 100%); display: none; }
+  #demo-bg.active { display: block; }
+  .demo-grid { position: absolute; inset: 0; background-image: linear-gradient(rgba(0,255,136,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(0,255,136,0.03) 1px, transparent 1px); background-size: 40px 40px; }
+  #ar-overlay { position: absolute; inset: 0; pointer-events: none; }
+  #ar-overlay .card-layer { position: absolute; inset: 0; pointer-events: auto; }
+
+  /* ── HUD ── */
+  .hud-top { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: linear-gradient(to bottom, rgba(0,0,0,0.7), transparent); pointer-events: none; z-index: 10; }
+  .hud-logo { font-size: 12px; letter-spacing: 5px; color: var(--neon); }
+  .hud-gps { display: flex; align-items: center; gap: 6px; font-size: 10px; letter-spacing: 1px; }
+  .gps-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--neon); }
+  .gps-dot.locked { animation: pulse-dot 1.5s ease-in-out infinite; }
+  .gps-dot.searching { background: var(--amber); animation: pulse-dot 0.6s ease-in-out infinite; }
+  @keyframes pulse-dot { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.6); opacity: 0.5; } }
+
+  .hud-bottom { position: absolute; bottom: 0; left: 0; right: 0; display: flex; align-items: flex-end; justify-content: space-between; padding: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom)); background: linear-gradient(to top, rgba(0,0,0,0.75), transparent); z-index: 10; }
+  .hud-coords { font-size: 9px; letter-spacing: 1px; color: #555; line-height: 1.8; }
+  .hud-coords span { color: #888; }
+
+  /* Scan button */
+  .scan-btn { display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; }
+  .scan-btn-circle { width: 60px; height: 60px; border: 2px solid var(--neon); border-radius: 50%; display: flex; align-items: center; justify-content: center; position: relative; background: rgba(0,0,0,0.6); transition: all 0.2s; }
+  .scan-btn-circle::before { content: ''; position: absolute; inset: -6px; border: 1px solid var(--neon-dim); border-radius: 50%; animation: scan-ring 2s ease-out infinite; }
+  @keyframes scan-ring { 0% { transform: scale(1); opacity: 0.6; } 100% { transform: scale(1.4); opacity: 0; } }
+  .scan-btn-circle:active { background: var(--neon-dim); }
+  .scan-btn-label { font-size: 9px; letter-spacing: 3px; color: var(--neon); }
+  .scan-btn-inner { width: 10px; height: 10px; border: 1px solid var(--neon); transform: rotate(45deg); }
+  .scan-btn.scanning .scan-btn-circle { border-color: var(--amber); animation: scan-flash 0.3s ease infinite; }
+  @keyframes scan-flash { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  /* Compass */
+  .compass { position: absolute; top: 56px; right: 16px; width: 52px; height: 52px; z-index: 10; cursor: pointer; }
+  .compass-ring { width: 52px; height: 52px; border: 1px solid rgba(0,255,136,0.3); border-radius: 50%; position: relative; display: flex; align-items: center; justify-content: center; }
+  .compass-needle { width: 2px; height: 28px; position: absolute; top: 12px; left: 50%; transform: translateX(-50%); transform-origin: bottom center; transition: transform 0.2s ease; }
+  .compass-needle-n { background: var(--neon); width: 2px; height: 14px; position: absolute; top: 0; left: 0; clip-path: polygon(50% 0%, 0% 100%, 100% 100%); }
+  .compass-needle-s { background: var(--danger); width: 2px; height: 14px; position: absolute; bottom: 0; left: 0; clip-path: polygon(0% 0%, 100% 0%, 50% 100%); }
+  .compass-n { position: absolute; top: 4px; right: 6px; font-size: 8px; color: var(--neon); letter-spacing: 0; }
+  .compass-heading { position: absolute; bottom: -16px; left: 50%; transform: translateX(-50%); font-size: 9px; color: #666; white-space: nowrap; }
+
+  /* Crosshair */
+  .crosshair { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 40px; height: 40px; pointer-events: none; z-index: 5; }
+  .crosshair::before, .crosshair::after { content: ''; position: absolute; background: rgba(0,255,136,0.5); }
+  .crosshair::before { width: 1px; height: 100%; left: 50%; top: 0; }
+  .crosshair::after { width: 100%; height: 1px; top: 50%; left: 0; }
+  .crosshair-dot { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 4px; height: 4px; background: var(--neon); border-radius: 50%; }
+
+  /* Scan ring animation */
+  .scan-ring-center { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); pointer-events: none; z-index: 4; }
+  .scan-ring-anim { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); border: 1px solid var(--neon-dim); border-radius: 50%; animation: expand-ring 3s ease-out infinite; }
+  .scan-ring-anim:nth-child(2) { animation-delay: 1s; }
+  .scan-ring-anim:nth-child(3) { animation-delay: 2s; }
+  @keyframes expand-ring { 0% { width: 30px; height: 30px; opacity: 0.6; } 100% { width: 200px; height: 200px; opacity: 0; } }
+
+  /* ── AR CARDS ── */
+  .ar-card { position: absolute; cursor: pointer; user-select: none; transform: translate(-50%, -100%); opacity: 0; transition: opacity 0.3s ease; }
+  .ar-card.visible { opacity: 1; }
+  .ar-card.dragging { transition: none; z-index: 50; }
+  .card-body { background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px 14px; min-width: 150px; max-width: 180px; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); position: relative; }
+  .card-body::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--neon), transparent); opacity: 0.6; }
+  .card-cat { font-size: 8px; letter-spacing: 2px; color: #555; margin-bottom: 4px; display: flex; align-items: center; gap: 5px; }
+  .card-icon { font-size: 14px; line-height: 1; }
+  .card-name { font-size: 12px; color: #fff; letter-spacing: 1px; line-height: 1.3; margin-bottom: 6px; }
+  .card-meta { display: flex; align-items: center; justify-content: space-between; }
+  .card-stars { color: var(--amber); font-size: 10px; letter-spacing: 1px; }
+  .card-dist { font-size: 10px; color: var(--neon); letter-spacing: 1px; }
+  .card-anchor { position: absolute; bottom: -32px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; pointer-events: none; }
+  .card-line { width: 1px; height: 24px; background: linear-gradient(to bottom, var(--neon-mid), transparent); }
+  .card-dot { width: 6px; height: 6px; background: var(--neon); border-radius: 50%; animation: glow-dot 1.5s ease-in-out infinite; margin-top: -2px; }
+  @keyframes glow-dot { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.6); } }
+
+  /* ── DETAIL PANEL ── */
+  #detail-panel { position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 200; display: flex; flex-direction: column; overflow-y: auto; transform: translateY(100%); transition: transform 0.35s cubic-bezier(0.4,0,0.2,1); }
+  #detail-panel.open { transform: translateY(0); }
+  .detail-header { padding: 20px 20px 0; display: flex; align-items: flex-start; justify-content: space-between; position: sticky; top: 0; background: rgba(0,0,0,0.95); z-index: 1; padding-bottom: 12px; border-bottom: 1px solid #111; }
+  .detail-close { width: 36px; height: 36px; border: 1px solid #333; background: transparent; color: var(--neon); font-family: var(--font); font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .detail-cat-chip { font-size: 9px; letter-spacing: 2px; color: #555; background: #111; padding: 4px 10px; border: 1px solid #222; display: inline-flex; align-items: center; gap: 5px; }
+  .detail-body { padding: 20px; flex: 1; }
+  .detail-icon-big { font-size: 40px; margin-bottom: 8px; display: block; }
+  .detail-name { font-size: 20px; color: #fff; letter-spacing: 2px; line-height: 1.3; margin-bottom: 10px; }
+  .detail-rating-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .detail-stars { color: var(--amber); font-size: 14px; letter-spacing: 2px; }
+  .detail-reviews { font-size: 11px; color: #555; }
+  .detail-dist-badge { background: var(--neon-dim); border: 1px solid var(--neon); color: var(--neon); font-size: 11px; letter-spacing: 2px; padding: 4px 12px; }
+  .detail-section { margin-bottom: 20px; }
+  .detail-section-label { font-size: 9px; letter-spacing: 3px; color: #444; margin-bottom: 8px; border-bottom: 1px solid #111; padding-bottom: 6px; }
+  .detail-about { font-size: 12px; color: #888; line-height: 1.8; letter-spacing: 0.5px; }
+  .detail-hours { display: flex; flex-direction: column; gap: 4px; }
+  .detail-hours-row { display: flex; justify-content: space-between; font-size: 11px; color: #666; }
+  .detail-hours-row span:last-child { color: #aaa; }
+  .detail-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .detail-tag { font-size: 10px; letter-spacing: 1px; color: var(--neon); border: 1px solid var(--neon-dim); padding: 4px 10px; }
+  .detail-actions { display: flex; gap: 8px; margin-top: 8px; padding: 0 20px 32px; }
+  .detail-action-btn { flex: 1; padding: 14px 8px; border: 1px solid var(--card-border); background: transparent; color: var(--neon); font-family: var(--font); font-size: 10px; letter-spacing: 2px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 5px; transition: background 0.2s; }
+  .detail-action-btn:active { background: var(--neon-dim); }
+  .detail-action-icon { font-size: 18px; }
+
+  /* Mode badge */
+  .mode-badge { position: absolute; top: 110px; left: 16px; font-size: 8px; letter-spacing: 2px; color: var(--amber); border: 1px solid #333; padding: 3px 8px; z-index: 10; display: none; }
+  .mode-badge.visible { display: block; }
+
+  /* Toast */
+  .toast { position: fixed; bottom: 120px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.9); border: 1px solid var(--neon); color: var(--neon); font-family: var(--font); font-size: 10px; letter-spacing: 2px; padding: 10px 20px; z-index: 300; opacity: 0; transition: opacity 0.3s; white-space: nowrap; pointer-events: none; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<!-- PERMISSION SCREEN -->
+<div class="screen" id="perm-screen">
+  <div class="perm-logo">AR PLACES</div>
+  <div class="perm-title">AUGMENTED<br>REALITY<br>EXPLORER</div>
+  <div class="perm-sub">Discover places around you using live camera and GPS positioning</div>
+  <div class="perm-items">
+    <div class="perm-item">
+      <div class="perm-item-icon">📷</div>
+      <div class="perm-item-text">CAMERA ACCESS<span>Rear camera for AR overlay</span></div>
+    </div>
+    <div class="perm-item">
+      <div class="perm-item-icon">📍</div>
+      <div class="perm-item-text">LOCATION ACCESS<span>GPS for nearby places</span></div>
+    </div>
+    <div class="perm-item">
+      <div class="perm-item-icon">🧭</div>
+      <div class="perm-item-text">MOTION SENSORS<span>Device orientation for compass</span></div>
+    </div>
+  </div>
+  <button class="btn-start" onclick="startAR()">ENABLE & START</button>
+  <button class="btn-demo" onclick="startDemo()">DEMO MODE (no permissions)</button>
+</div>
+
+<!-- LOADING SCREEN -->
+<div class="screen hidden" id="load-screen">
+  <div class="load-label">INITIALIZING</div>
+  <div class="load-ring"></div>
+  <div class="load-msg" id="load-msg">REQUESTING CAMERA...</div>
+  <div class="progress-bar"><div class="progress-fill" id="prog"></div></div>
+</div>
+
+<!-- AR VIEW -->
+<div id="ar-view" style="display:none;">
+  <video id="camera" autoplay playsinline muted></video>
+  <div id="demo-bg"><div class="demo-grid"></div></div>
+
+  <!-- Scan rings -->
+  <div class="scan-ring-center">
+    <div class="scan-ring-anim"></div>
+    <div class="scan-ring-anim"></div>
+    <div class="scan-ring-anim"></div>
+  </div>
+
+  <!-- Crosshair -->
+  <div class="crosshair"><div class="crosshair-dot"></div></div>
+
+  <!-- AR overlay -->
+  <div id="ar-overlay"><div class="card-layer" id="card-layer"></div></div>
+
+  <!-- HUD top -->
+  <div class="hud-top">
+    <div class="hud-logo">◈ AR PLACES</div>
+    <div class="hud-gps">
+      <div class="gps-dot searching" id="gps-dot"></div>
+      <span id="gps-status">SEARCHING</span>
+    </div>
+  </div>
+
+  <!-- Compass -->
+  <div class="compass" id="compass-widget">
+    <div class="compass-ring">
+      <div class="compass-needle" id="compass-needle">
+        <div class="compass-needle-n"></div>
+        <div class="compass-needle-s"></div>
+      </div>
+      <span class="compass-n">N</span>
+    </div>
+    <div class="compass-heading" id="compass-heading-val">---°</div>
+  </div>
+
+  <!-- Demo badge -->
+  <div class="mode-badge" id="mode-badge">DEMO MODE</div>
+
+  <!-- HUD bottom -->
+  <div class="hud-bottom">
+    <div class="hud-coords">
+      <div>LAT <span id="coord-lat">---.------</span></div>
+      <div>LNG <span id="coord-lng">---.------</span></div>
+      <div>ALT <span id="coord-alt">---</span>m</div>
+    </div>
+    <div class="scan-btn" id="scan-btn" onclick="scanPlaces()">
+      <div class="scan-btn-circle"><div class="scan-btn-inner"></div></div>
+      <div class="scan-btn-label">SCAN</div>
+    </div>
+    <div style="width:80px; text-align:right; font-size:9px; color:#444; letter-spacing:1px; line-height:1.8;">
+      <div id="hdg-display">HDG ---°</div>
+      <div id="places-count">0 PLACES</div>
+    </div>
+  </div>
+</div>
+
+<!-- DETAIL PANEL -->
+<div id="detail-panel">
+  <div class="detail-header">
+    <div id="detail-cat" class="detail-cat-chip"></div>
+    <button class="detail-close" onclick="closeDetail()">✕</button>
+  </div>
+  <div class="detail-body">
+    <span class="detail-icon-big" id="detail-icon"></span>
+    <div class="detail-name" id="detail-name"></div>
+    <div class="detail-rating-row">
+      <span class="detail-stars" id="detail-stars"></span>
+      <span class="detail-reviews" id="detail-reviews"></span>
+      <span class="detail-dist-badge" id="detail-dist"></span>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-label">ABOUT</div>
+      <div class="detail-about" id="detail-about"></div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-label">HOURS</div>
+      <div class="detail-hours" id="detail-hours"></div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-label">TAGS</div>
+      <div class="detail-tags" id="detail-tags"></div>
+    </div>
+  </div>
+  <div class="detail-actions">
+    <button class="detail-action-btn" onclick="showToast('OPENING MAPS...')"><span class="detail-action-icon">🗺️</span>DIRECTIONS</button>
+    <button class="detail-action-btn" onclick="showToast('LINK COPIED')"><span class="detail-action-icon">↗</span>SHARE</button>
+    <button class="detail-action-btn" onclick="showToast('PLACE SAVED')"><span class="detail-action-icon">◈</span>SAVE</button>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+/* ═══════════════════════════════════════════════════
+   PLACE DATA — Dubai POIs
+   PRODUCTION HOOK: Replace with live fetch from:
+   - Google Places API: https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=2000&key=YOUR_KEY
+   - Overpass API: https://overpass-api.de/api/interpreter?data=[out:json];node(around:2000,${lat},${lng})[amenity];out;
+   ═══════════════════════════════════════════════════ */
+const PLACES = [
+  {
+    id: 1,
+    name: "Burj Khalifa",
+    category: "LANDMARK",
+    icon: "🏙️",
+    rating: 4.8,
+    reviews: 142803,
+    distance: "0.4 km",
+    distNum: 400,
+    description: "The world's tallest building at 828m, dominating Dubai's skyline. The observation decks on floors 124 and 148 offer panoramic views across the emirate to the Arabian Gulf and beyond.",
+    hours: [
+      { day: "MON–FRI", time: "08:30 – 23:00" },
+      { day: "SATURDAY", time: "08:30 – 23:30" },
+      { day: "SUNDAY", time: "08:30 – 23:00" },
+    ],
+    tags: ["OBSERVATION DECK", "PHOTOGRAPHY", "ICONIC", "TOURIST"],
+    headingAngle: 15,
+    posX: 0.18, posY: 0.22,
+  },
+  {
+    id: 2,
+    name: "Emirates Towers",
+    category: "OFFICE / HOTEL",
+    icon: "🏢",
+    rating: 4.5,
+    reviews: 22450,
+    distance: "0.7 km",
+    distNum: 700,
+    description: "Twin towers that defined Dubai's modern skyline. The taller 355m office tower hosts corporate giants while the hotel tower offers some of the city's finest dining and The Agency bar.",
+    hours: [
+      { day: "LOBBY 24/7", time: "Always open" },
+      { day: "DINING", time: "12:00 – 01:00" },
+    ],
+    tags: ["BUSINESS", "HOTEL", "FINE DINING", "ARCHITECTURE"],
+    headingAngle: 55,
+    posX: 0.75, posY: 0.18,
+  },
+  {
+    id: 3,
+    name: "Zuma Dubai",
+    category: "RESTAURANT",
+    icon: "🍱",
+    rating: 4.7,
+    reviews: 18920,
+    distance: "1.1 km",
+    distNum: 1100,
+    description: "World-renowned contemporary izakaya restaurant in the Gate Village of DIFC. Celebrated for its robata grill, sushi counter, and vibrant cocktail bar. Book weeks ahead for weekend reservations.",
+    hours: [
+      { day: "MON–THU", time: "12:00 – 00:30" },
+      { day: "FRI–SAT", time: "12:00 – 01:30" },
+      { day: "SUNDAY", time: "12:00 – 00:30" },
+    ],
+    tags: ["JAPANESE", "ROBATA", "COCKTAILS", "DIFC", "FINE DINING"],
+    headingAngle: 110,
+    posX: 0.55, posY: 0.55,
+  },
+  {
+    id: 4,
+    name: "The Dubai Mall",
+    category: "SHOPPING",
+    icon: "🛍️",
+    rating: 4.6,
+    reviews: 231000,
+    distance: "0.5 km",
+    distNum: 500,
+    description: "The world's largest shopping centre by total area — 1,200 retail stores, an Olympic-size ice rink, Dubai Aquarium, VR Park, and the spectacular Dubai Fountain right outside.",
+    hours: [
+      { day: "SUN–WED", time: "10:00 – 00:00" },
+      { day: "THU–SAT", time: "10:00 – 01:00" },
+    ],
+    tags: ["SHOPPING", "AQUARIUM", "FOOD COURT", "ENTERTAINMENT", "FOUNTAIN"],
+    headingAngle: 200,
+    posX: 0.28, posY: 0.65,
+  },
+  {
+    id: 5,
+    name: "% Arabica DIFC",
+    category: "CAFÉ",
+    icon: "☕",
+    rating: 4.4,
+    reviews: 4320,
+    distance: "0.3 km",
+    distNum: 300,
+    description: "Minimalist Japanese specialty coffee brand now in DIFC's Gate Village. Known for precise pour-overs and its signature latte. A calm refuge between the towers for remote workers and coffee purists.",
+    hours: [
+      { day: "DAILY", time: "07:00 – 22:00" },
+    ],
+    tags: ["SPECIALTY COFFEE", "JAPANESE", "MINIMALIST", "WIFI"],
+    headingAngle: 255,
+    posX: 0.82, posY: 0.60,
+  },
+  {
+    id: 6,
+    name: "Waitrose DIFC",
+    category: "SUPERMARKET",
+    icon: "🛒",
+    rating: 4.3,
+    reviews: 2180,
+    distance: "0.2 km",
+    distNum: 200,
+    description: "Premium British supermarket serving DIFC residents and workers. Excellent selection of imported goods, fresh sushi counter, deli, and bakery. Closest quality grocery stop to the financial district.",
+    hours: [
+      { day: "DAILY", time: "07:00 – 23:00" },
+    ],
+    tags: ["GROCERY", "BRITISH", "PREMIUM", "FRESH PRODUCE"],
+    headingAngle: 310,
+    posX: 0.44, posY: 0.35,
+  },
+];
+
+/* ═══════════════════════════════════════════════════
+   STATE
+   ═══════════════════════════════════════════════════ */
+let isDemo = false;
+let gpsLocked = false;
+let currentHeading = 0;
+let userLat = 25.2048; // Default: Dubai
+let userLng = 55.2708;
+let userAlt = 0;
+let dragState = null;
+let cardPositions = {};
+let visibleCards = [];
+let scanTimeout = null;
+
+/* ═══════════════════════════════════════════════════
+   PERMISSION & INIT FLOW
+   ═══════════════════════════════════════════════════ */
+async function startAR() {
+  showScreen('load-screen');
+  await runLoadSequence(false);
+}
+
+function startDemo() {
+  isDemo = true;
+  showScreen('load-screen');
+  runLoadSequence(true);
+}
+
+async function runLoadSequence(demo) {
+  const msgs = [
+    [0,  "REQUESTING CAMERA..."],
+    [20, "REQUESTING LOCATION..."],
+    [45, "CALIBRATING SENSORS..."],
+    [65, "LOADING PLACE DATA..."],
+    [85, "RENDERING AR OVERLAY..."],
+    [100,"READY"],
+  ];
+
+  const setMsg = (pct, txt) => {
+    document.getElementById('load-msg').textContent = txt;
+    document.getElementById('prog').style.width = pct + '%';
+  };
+
+  if (!demo) {
+    setMsg(0, "REQUESTING CAMERA...");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: false
+      });
+      const vid = document.getElementById('camera');
+      vid.srcObject = stream;
+      await vid.play();
+    } catch(e) {
+      isDemo = true;
+    }
+  }
+
+  for (let i = 1; i < msgs.length; i++) {
+    await delay(i === msgs.length-1 ? 300 : 400 + Math.random()*200);
+    setMsg(msgs[i][0], msgs[i][1]);
+  }
+
+  await delay(400);
+  initARView();
+}
+
+function initARView() {
+  showScreen(null);
+  document.getElementById('ar-view').style.display = 'block';
+
+  if (isDemo) {
+    document.getElementById('demo-bg').classList.add('active');
+    document.getElementById('mode-badge').classList.add('visible');
+    document.getElementById('camera').style.display = 'none';
+    // Simulate GPS lock after 2s
+    setTimeout(() => {
+      gpsLocked = true;
+      updateGPSDisplay(25.2048, 55.2708, 12);
+    }, 2000);
+    // Simulate compass movement
+    simulateCompass();
+  } else {
+    startGPS();
+  }
+
+  startOrientationListener();
+  setTimeout(() => spawnCards(), 800);
+}
+
+/* ═══════════════════════════════════════════════════
+   GPS
+   ═══════════════════════════════════════════════════ */
+function startGPS() {
+  if (!navigator.geolocation) return;
+  navigator.geolocation.watchPosition(
+    (pos) => {
+      gpsLocked = true;
+      userLat = pos.coords.latitude;
+      userLng = pos.coords.longitude;
+      userAlt = pos.coords.altitude || 0;
+      updateGPSDisplay(userLat, userLng, userAlt);
+
+      /* PRODUCTION HOOK: Recalculate bearing to each place from actual GPS:
+         function calcBearing(lat1, lng1, lat2, lng2) {
+           const dLng = (lng2 - lng1) * Math.PI/180;
+           const la1 = lat1 * Math.PI/180, la2 = lat2 * Math.PI/180;
+           const y = Math.sin(dLng)*Math.cos(la2);
+           const x = Math.cos(la1)*Math.sin(la2) - Math.sin(la1)*Math.cos(la2)*Math.cos(dLng);
+           return (Math.atan2(y,x)*180/Math.PI + 360) % 360;
+         }
+         Then filter: places where |bearing - currentHeading| < 45 degrees (field of view)
+      */
+    },
+    (err) => {
+      document.getElementById('gps-status').textContent = 'NO GPS';
+    },
+    { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+  );
+}
+
+function updateGPSDisplay(lat, lng, alt) {
+  document.getElementById('coord-lat').textContent = lat.toFixed(6);
+  document.getElementById('coord-lng').textContent = lng.toFixed(6);
+  document.getElementById('coord-alt').textContent = Math.round(alt || 0);
+  const dot = document.getElementById('gps-dot');
+  dot.className = 'gps-dot locked';
+  document.getElementById('gps-status').textContent = 'GPS LOCK';
+}
+
+/* ═══════════════════════════════════════════════════
+   COMPASS / ORIENTATION
+   ═══════════════════════════════════════════════════ */
+function startOrientationListener() {
+  const handler = (e) => {
+    let heading = 0;
+    if (e.webkitCompassHeading != null) {
+      heading = e.webkitCompassHeading; // iOS
+    } else if (e.alpha != null) {
+      heading = (360 - e.alpha) % 360; // Android
+    }
+    updateCompass(heading);
+  };
+
+  if (typeof DeviceOrientationEvent !== 'undefined') {
+    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+      // iOS 13+ — trigger request on user gesture
+      document.getElementById('compass-widget').addEventListener('click', () => {
+        DeviceOrientationEvent.requestPermission().then(s => {
+          if (s === 'granted') window.addEventListener('deviceorientation', handler);
+        }).catch(console.error);
+      });
+    } else {
+      window.addEventListener('deviceorientation', handler);
+    }
+  }
+}
+
+function updateCompass(heading) {
+  currentHeading = heading;
+  document.getElementById('compass-needle').style.transform = `translateX(-50%) rotate(${heading}deg)`;
+  document.getElementById('compass-heading-val').textContent = Math.round(heading) + '°';
+  document.getElementById('hdg-display').textContent = 'HDG ' + Math.round(heading) + '°';
+}
+
+function simulateCompass() {
+  let h = 0;
+  setInterval(() => {
+    h = (h + 0.4) % 360;
+    updateCompass(h);
+  }, 50);
+}
+
+/* ═══════════════════════════════════════════════════
+   AR CARDS
+   ═══════════════════════════════════════════════════ */
+function spawnCards() {
+  const layer = document.getElementById('card-layer');
+  layer.innerHTML = '';
+  visibleCards = [];
+  cardPositions = {};
+  document.getElementById('places-count').textContent = '0 PLACES';
+
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+
+  /* PRODUCTION HOOK: Filter places by compass heading ±45° FOV:
+     const visiblePlaces = PLACES.filter(p => {
+       const bearing = calcBearing(userLat, userLng, p.lat, p.lng);
+       const diff = Math.abs(((bearing - currentHeading + 540) % 360) - 180);
+       return diff < 45;
+     });
+     Currently using hardcoded posX/posY and headingAngle.
+  */
+
+  PLACES.forEach((place, i) => {
+    const el = document.createElement('div');
+    el.className = 'ar-card';
+    el.id = 'card-' + place.id;
+    el.dataset.placeId = place.id;
+
+    const x = Math.round(place.posX * vw);
+    const y = Math.round(place.posY * vh);
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+    cardPositions[place.id] = { x, y };
+
+    const stars = '★'.repeat(Math.floor(place.rating)) + (place.rating % 1 >= 0.5 ? '½' : '') + '☆'.repeat(5 - Math.ceil(place.rating));
+
+    el.innerHTML = `
+      <div class="card-body">
+        <div class="card-cat"><span class="card-icon">${place.icon}</span>${place.category}</div>
+        <div class="card-name">${place.name}</div>
+        <div class="card-meta">
+          <span class="card-stars">${stars.slice(0,5)}</span>
+          <span class="card-dist">${place.distance}</span>
+        </div>
+      </div>
+      <div class="card-anchor">
+        <div class="card-line"></div>
+        <div class="card-dot"></div>
+      </div>
+    `;
+
+    el.addEventListener('click', (e) => { if (!dragState) openDetail(place.id); });
+    setupCardDrag(el, place.id);
+
+    layer.appendChild(el);
+
+    setTimeout(() => {
+      el.classList.add('visible');
+      visibleCards.push(place.id);
+      document.getElementById('places-count').textContent = visibleCards.length + ' PLACES';
+    }, i * 180);
+  });
+}
+
+function setupCardDrag(el, id) {
+  let startX, startY, origX, origY, moved;
+
+  const onStart = (e) => {
+    const t = e.touches ? e.touches[0] : e;
+    startX = t.clientX; startY = t.clientY;
+    origX = cardPositions[id].x; origY = cardPositions[id].y;
+    moved = false;
+    el.classList.add('dragging');
+    dragState = id;
+    e.preventDefault();
+  };
+
+  const onMove = (e) => {
+    if (dragState !== id) return;
+    const t = e.touches ? e.touches[0] : e;
+    const dx = t.clientX - startX, dy = t.clientY - startY;
+    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) moved = true;
+    if (!moved) return;
+    const nx = origX + dx, ny = origY + dy;
+    el.style.left = nx + 'px';
+    el.style.top = ny + 'px';
+    cardPositions[id] = { x: nx, y: ny };
+    e.preventDefault();
+  };
+
+  const onEnd = () => {
+    el.classList.remove('dragging');
+    setTimeout(() => { dragState = null; }, 50);
+  };
+
+  el.addEventListener('touchstart', onStart, { passive: false });
+  el.addEventListener('touchmove', onMove, { passive: false });
+  el.addEventListener('touchend', onEnd);
+  el.addEventListener('mousedown', onStart);
+  window.addEventListener('mousemove', (e) => { if (dragState === id) onMove(e); });
+  window.addEventListener('mouseup', (e) => { if (dragState === id) onEnd(); });
+}
+
+/* ═══════════════════════════════════════════════════
+   SCAN
+   ═══════════════════════════════════════════════════ */
+function scanPlaces() {
+  if (scanTimeout) return;
+  const btn = document.getElementById('scan-btn');
+  btn.classList.add('scanning');
+
+  // Clear cards
+  document.getElementById('card-layer').innerHTML = '';
+  visibleCards = [];
+  document.getElementById('places-count').textContent = '0 PLACES';
+
+  /* PRODUCTION HOOK: Re-fetch places from API here using current GPS coords:
+     fetch(`https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${userLat},${userLng}&radius=1500&key=YOUR_KEY`)
+       .then(r => r.json()).then(data => { PLACES = transformGooglePlaces(data.results); spawnCards(); });
+  */
+
+  scanTimeout = setTimeout(() => {
+    btn.classList.remove('scanning');
+    spawnCards();
+    scanTimeout = null;
+  }, 1200);
+}
+
+/* ═══════════════════════════════════════════════════
+   DETAIL PANEL
+   ═══════════════════════════════════════════════════ */
+function openDetail(id) {
+  const place = PLACES.find(p => p.id === id);
+  if (!place) return;
+
+  document.getElementById('detail-cat').innerHTML = `<span style="font-size:14px;margin-right:5px;">${place.icon}</span>${place.category}`;
+  document.getElementById('detail-icon').textContent = place.icon;
+  document.getElementById('detail-name').textContent = place.name;
+  document.getElementById('detail-stars').textContent = '★'.repeat(Math.floor(place.rating)) + (place.rating % 1 >= 0.5 ? '½' : '');
+  document.getElementById('detail-reviews').textContent = place.reviews.toLocaleString() + ' REVIEWS';
+  document.getElementById('detail-dist').textContent = '◎ ' + place.distance;
+  document.getElementById('detail-about').textContent = place.description;
+
+  /* PRODUCTION HOOK: Generate richer description with Claude API:
+     const res = await fetch('https://api.anthropic.com/v1/messages', {
+       method: 'POST',
+       headers: { 'Content-Type': 'application/json' },
+       body: JSON.stringify({
+         model: 'claude-sonnet-4-20250514',
+         max_tokens: 300,
+         messages: [{ role: 'user', content: `Write a compelling 2-sentence visitor description for ${place.name} in Dubai. Focus on what makes it unique.` }]
+       })
+     });
+     const data = await res.json();
+     document.getElementById('detail-about').textContent = data.content[0].text;
+  */
+
+  const hoursEl = document.getElementById('detail-hours');
+  hoursEl.innerHTML = place.hours.map(h =>
+    `<div class="detail-hours-row"><span>${h.day}</span><span>${h.time}</span></div>`
+  ).join('');
+
+  const tagsEl = document.getElementById('detail-tags');
+  tagsEl.innerHTML = place.tags.map(t => `<span class="detail-tag">${t}</span>`).join('');
+
+  document.getElementById('detail-panel').classList.add('open');
+}
+
+function closeDetail() {
+  document.getElementById('detail-panel').classList.remove('open');
+}
+
+/* ═══════════════════════════════════════════════════
+   UTILS
+   ═══════════════════════════════════════════════════ */
+function showScreen(id) {
+  ['perm-screen','load-screen'].forEach(s => {
+    const el = document.getElementById(s);
+    if (s === id) el.classList.remove('hidden');
+    else el.classList.add('hidden');
+  });
+}
+
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 1800);
+}
+
+// Handle orientation change
+window.addEventListener('resize', () => {
+  // Reposition cards proportionally
+  const vw = window.innerWidth, vh = window.innerHeight;
+  PLACES.forEach(p => {
+    const el = document.getElementById('card-' + p.id);
+    if (!el) return;
+    const nx = Math.round(p.posX * vw), ny = Math.round(p.posY * vh);
+    el.style.left = nx + 'px';
+    el.style.top = ny + 'px';
+    cardPositions[p.id] = { x: nx, y: ny };
+  });
+});
+
+// Prevent pull-to-refresh
+document.addEventListener('touchmove', (e) => {
+  if (e.target.closest('#detail-panel')) return;
+  e.preventDefault();
+}, { passive: false });
+</script>
+</body>
+</html>
