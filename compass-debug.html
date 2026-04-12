@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Compass Debug</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #111; color: #fff; font-family: monospace; padding: 20px; }
+h2 { font-size: 16px; margin-bottom: 20px; color: #aaa; }
+.row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #222; font-size: 14px; }
+.label { color: #888; }
+.val { color: #0f0; font-size: 16px; }
+.val.red { color: #f44; }
+.val.yellow { color: #fa0; }
+button {
+  display: block; width: 100%; margin-top: 16px; padding: 14px;
+  font-size: 15px; background: #fff; color: #000; border: none;
+  border-radius: 8px; cursor: pointer;
+}
+#log {
+  margin-top: 20px; font-size: 11px; color: #555;
+  line-height: 1.9; max-height: 200px; overflow-y: auto;
+}
+.compass {
+  width: 120px; height: 120px; margin: 24px auto;
+  border: 2px solid #333; border-radius: 50%;
+  position: relative; display: flex; align-items: center; justify-content: center;
+}
+.needle {
+  width: 4px; height: 90px; position: absolute;
+  transform-origin: center center;
+}
+.needle-n { background: linear-gradient(to bottom, red 50%, #333 50%); }
+</style>
+</head>
+<body>
+<h2>Compass Debugger</h2>
+
+<div class="compass">
+  <div class="needle needle-n" id="needle"></div>
+  <span style="position:absolute;top:6px;font-size:11px;color:#888">N</span>
+  <span style="position:absolute;bottom:6px;font-size:11px;color:#444">S</span>
+</div>
+
+<div class="row"><span class="label">Event type firing</span><span class="val" id="evtype">none yet</span></div>
+<div class="row"><span class="label">alpha (raw)</span><span class="val" id="alpha">—</span></div>
+<div class="row"><span class="label">beta</span><span class="val" id="beta">—</span></div>
+<div class="row"><span class="label">gamma</span><span class="val" id="gamma">—</span></div>
+<div class="row"><span class="label">e.absolute</span><span class="val" id="absolute">—</span></div>
+<div class="row"><span class="label">webkitCompassHeading</span><span class="val" id="webkit">—</span></div>
+<div class="row"><span class="label">Computed heading</span><span class="val" id="heading" style="font-size:22px">—</span></div>
+
+<button id="btn" onclick="requestPerm()">Tap to Request Permission (iOS)</button>
+
+<div id="log"></div>
+
+<script>
+let eventCount = 0;
+
+function log(msg) {
+  const el = document.getElementById('log');
+  el.innerHTML = `<div>${msg}</div>` + el.innerHTML;
+}
+
+function handle(e) {
+  eventCount++;
+  document.getElementById('evtype').textContent = e.type + ' #' + eventCount;
+  document.getElementById('alpha').textContent    = e.alpha    != null ? e.alpha.toFixed(2)    : 'null';
+  document.getElementById('beta').textContent     = e.beta     != null ? e.beta.toFixed(2)     : 'null';
+  document.getElementById('gamma').textContent    = e.gamma    != null ? e.gamma.toFixed(2)    : 'null';
+  document.getElementById('absolute').textContent = e.absolute != null ? String(e.absolute)    : 'null';
+
+  const wk = e.webkitCompassHeading;
+  document.getElementById('webkit').textContent = wk != null ? wk.toFixed(2) : 'null';
+
+  // Compute heading
+  let h = null;
+  if (typeof wk === 'number' && wk >= 0) {
+    h = wk;
+    document.getElementById('heading').textContent = h.toFixed(1) + '° (iOS webkit)';
+  } else if (e.alpha != null && e.absolute) {
+    h = (360 - e.alpha) % 360;
+    document.getElementById('heading').textContent = h.toFixed(1) + '° (absolute alpha)';
+  } else if (e.alpha != null) {
+    h = (360 - e.alpha) % 360;
+    document.getElementById('heading').textContent = h.toFixed(1) + '° ⚠ RELATIVE only';
+    document.getElementById('heading').classList.add('yellow');
+  } else {
+    document.getElementById('heading').textContent = 'no heading';
+    document.getElementById('heading').classList.add('red');
+  }
+
+  if (h != null) {
+    document.getElementById('needle').style.transform = `rotate(${h}deg)`;
+  }
+
+  if (eventCount === 1) log('First event received: ' + e.type);
+}
+
+// Try attaching immediately (Android)
+window.addEventListener('deviceorientationabsolute', e => { log('deviceorientationabsolute fired'); handle(e); }, true);
+window.addEventListener('deviceorientation',         e => { handle(e); }, true);
+
+log('Listeners attached. Waiting for events...');
+
+// Check if iOS needs permission
+if (typeof DeviceOrientationEvent !== 'undefined' &&
+    typeof DeviceOrientationEvent.requestPermission === 'function') {
+  document.getElementById('btn').textContent = '⚠ iOS detected — Tap to allow compass';
+  log('iOS 13+ detected — permission required');
+} else {
+  document.getElementById('btn').textContent = 'Android / Permission not needed — events auto-fire';
+  log('Non-iOS — no permission dialog needed');
+}
+
+function requestPerm() {
+  if (typeof DeviceOrientationEvent?.requestPermission === 'function') {
+    DeviceOrientationEvent.requestPermission()
+      .then(state => {
+        log('Permission result: ' + state);
+        if (state === 'granted') {
+          window.addEventListener('deviceorientation', handle, true);
+          log('Listener attached after permission granted');
+        }
+      })
+      .catch(e => log('Error: ' + e));
+  } else {
+    log('No permission API — already listening');
+  }
+}
+
+// After 3s, report if nothing came in
+setTimeout(() => {
+  if (eventCount === 0) log('⚠ No events after 3s — check browser settings or try https');
+}, 3000);
+</script>
+</body>
+</html>
