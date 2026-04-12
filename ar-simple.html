@@ -5,101 +5,90 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>AR Simple</title>
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { background: #000; overflow: hidden; font-family: sans-serif; }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#000; overflow:hidden; font-family:sans-serif; color:#fff; }
+video  { position:fixed; inset:0; width:100%; height:100%; object-fit:cover; z-index:0; }
+canvas { position:fixed; inset:0; width:100%; height:100%; z-index:1; }
 
-video  { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
-canvas { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 1; }
-
-/* Full-screen panels */
 .panel {
-  position: fixed; inset: 0; z-index: 10;
-  display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-  background: rgba(0,0,0,0.93); color: #fff;
-  gap: 20px; padding: 40px 32px; text-align: center;
+  position:fixed; inset:0; z-index:10; background:#000;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:20px; padding:40px 28px; text-align:center;
 }
-.panel.hidden { display: none; }
+.panel.hidden { display:none; }
+h2 { font-size:22px; }
+p  { font-size:13px; color:#999; line-height:1.9; max-width:290px; }
+em { color:#ffcc00; font-style:normal; font-weight:bold; }
 
-.panel h2  { font-size: 22px; }
-.panel p   { font-size: 14px; color: #aaa; line-height: 1.8; max-width: 290px; }
-.panel em  { color: #fff; font-style: normal; font-weight: bold; }
-
-.big-btn {
-  width: 100%; max-width: 300px;
-  padding: 18px; font-size: 17px; font-weight: bold;
-  background: #fff; color: #000;
-  border: none; border-radius: 10px; cursor: pointer;
+.btn {
+  width:100%; max-width:300px; padding:18px;
+  font-size:16px; font-weight:bold;
+  border:none; border-radius:10px; cursor:pointer;
 }
-.big-btn.yellow { background: #ffcc00; color: #000; font-size: 18px; padding: 20px; }
+.btn-white  { background:#fff; color:#000; }
+.btn-yellow { background:#ffcc00; color:#000; font-size:18px; padding:20px; }
 
-/* Compass rose hint */
-.rose { font-size: 64px; line-height: 1; }
-
-/* Recalibrate button — always visible bottom centre */
 #recalib {
-  position: fixed; bottom: 54px; left: 50%; transform: translateX(-50%);
-  z-index: 5; background: rgba(255,204,0,0.9); color: #000;
-  border: none; border-radius: 8px; padding: 12px 24px;
-  font-size: 14px; font-weight: bold; cursor: pointer; display: none;
+  position:fixed; bottom:54px; left:50%; transform:translateX(-50%);
+  z-index:5; display:none;
+  background:rgba(255,204,0,0.9); color:#000;
+  border:none; border-radius:8px; padding:12px 28px;
+  font-size:14px; font-weight:bold; cursor:pointer;
 }
-
 #debug {
-  position: fixed; bottom: 8px; left: 8px; right: 8px; z-index: 5;
-  font-size: 11px; color: rgba(255,255,255,0.7);
-  background: rgba(0,0,0,0.55); padding: 7px 10px; border-radius: 6px; line-height: 1.8;
+  position:fixed; bottom:8px; left:8px; right:8px; z-index:5;
+  font-size:11px; color:rgba(255,255,255,0.8);
+  background:rgba(0,0,0,0.65); padding:8px 10px;
+  border-radius:6px; line-height:2;
 }
 </style>
 </head>
 <body>
 
-<!-- Step 1: Start -->
 <div class="panel" id="p1">
   <h2>AR Locator</h2>
-  <p>Shows 5 nearby locations through your camera.</p>
-  <button class="big-btn" onclick="startAR()">Start Camera</button>
+  <p>Tap to allow <em>camera</em>, <em>location</em> and <em>motion</em>.</p>
+  <button class="btn btn-white" onclick="startAR()">Allow &amp; Start</button>
 </div>
 
-<!-- Step 2: Calibrate (fullscreen, impossible to miss) -->
 <div class="panel hidden" id="p2">
-  <div class="rose">🧭</div>
+  <div style="font-size:64px">🧭</div>
   <h2>Point North</h2>
-  <p>Physically rotate your phone until it faces <em>North</em>, then tap the button below.</p>
-  <p style="font-size:12px;color:#666">Use your surroundings or a maps app to find North first.</p>
-  <button class="big-btn yellow" onclick="calibrate()">✓ I am pointing North</button>
+  <p>Rotate your phone/tablet to face <em>North</em>, then tap:</p>
+  <button class="btn btn-yellow" onclick="calibrate()">✓ I am pointing North</button>
 </div>
 
 <video id="vid" autoplay playsinline muted></video>
 <canvas id="cv"></canvas>
-
 <button id="recalib" onclick="showCalib()">🧭 Recalibrate North</button>
 <div id="debug">—</div>
 
 <script>
 const PLACES = [
-  { name: 'Burj Khalifa',    lat: 25.197197, lng: 55.274376, color: '#ff4444' },
-  { name: 'Dubai Mall',      lat: 25.198765, lng: 55.279503, color: '#44aaff' },
-  { name: 'Dubai Opera',     lat: 25.194987, lng: 55.272345, color: '#44ff88' },
-  { name: 'Armani Hotel',    lat: 25.196500, lng: 55.273800, color: '#ffaa00' },
-  { name: 'Emirates Towers', lat: 25.217345, lng: 55.282123, color: '#ff44ff' },
+  { name:'Burj Khalifa',    lat:25.197197, lng:55.274376, color:'#ff4444' },
+  { name:'Dubai Mall',      lat:25.198765, lng:55.279503, color:'#44aaff' },
+  { name:'Dubai Opera',     lat:25.194987, lng:55.272345, color:'#44ff88' },
+  { name:'Armani Hotel',    lat:25.196500, lng:55.273800, color:'#ffaa00' },
+  { name:'Emirates Towers', lat:25.217345, lng:55.282123, color:'#ff44ff' },
 ];
 
 const canvas = document.getElementById('cv');
 const ctx    = canvas.getContext('2d');
-
 let userLat = 25.2120, userLng = 55.2817;
+let absHeading = null;
 let rawAlpha   = null;
 let northAlpha = null;
 let calibrated = false;
-let iosMode    = false;
+let method     = 'none';
+let eventCount = 0;
 
 function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
 window.addEventListener('resize', resize);
 resize();
 
 function getHeading() {
-  if (iosMode && window._iosHeading != null) return window._iosHeading;
-  if (!calibrated || rawAlpha == null) return null;
+  if (absHeading !== null) return absHeading;
+  if (!calibrated || rawAlpha === null) return null;
   return ((rawAlpha - northAlpha) + 360) % 360;
 }
 
@@ -110,166 +99,178 @@ function showCalib() {
 }
 
 function calibrate() {
-  if (rawAlpha == null) {
-    alert('Sensor not ready yet — try rotating the phone and wait a moment.');
-    return;
-  }
-  northAlpha = rawAlpha;
+  northAlpha = rawAlpha ?? 0;
   calibrated = true;
   document.getElementById('p2').classList.add('hidden');
   document.getElementById('recalib').style.display = 'block';
 }
 
-function bearing(lat1, lon1, lat2, lon2) {
-  const R = Math.PI / 180;
-  const dL = (lon2 - lon1) * R;
-  const y = Math.sin(dL) * Math.cos(lat2 * R);
-  const x = Math.cos(lat1 * R) * Math.sin(lat2 * R)
-           - Math.sin(lat1 * R) * Math.cos(lat2 * R) * Math.cos(dL);
-  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+function onAbsolute(h, src) {
+  absHeading = h;
+  method = src;
+  calibrated = true;
+  document.getElementById('p2').classList.add('hidden');
+  document.getElementById('recalib').style.display = 'none';
 }
 
-function dist(lat1, lon1, lat2, lon2) {
-  const R = 6371000, r = Math.PI / 180;
-  const dφ = (lat2 - lat1) * r, dλ = (lon2 - lon1) * r;
-  const a = Math.sin(dφ/2)**2 + Math.cos(lat1*r)*Math.cos(lat2*r)*Math.sin(dλ/2)**2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+// ── Sensor handler ──
+function handleOrientation(e) {
+  eventCount++;
+
+  // iOS webkitCompassHeading — true north, no calibration needed
+  if (typeof e.webkitCompassHeading === 'number' && e.webkitCompassHeading >= 0) {
+    onAbsolute(e.webkitCompassHeading, 'iOS webkit');
+    return;
+  }
+
+  // Absolute alpha — true north on Android
+  if (e.absolute === true && e.alpha != null) {
+    onAbsolute((360 - e.alpha) % 360, 'absolute alpha');
+    return;
+  }
+
+  // Relative alpha — needs North calibration
+  if (e.alpha != null) {
+    rawAlpha = e.alpha;
+    method   = 'relative (needs calib)';
+  }
 }
 
-function fmtDist(m) {
-  return m < 1000 ? Math.round(m) + 'm' : (m/1000).toFixed(1) + 'km';
+function attachListeners() {
+  window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+  window.addEventListener('deviceorientation',         handleOrientation, true);
 }
 
+// ── Try AbsoluteOrientationSensor (Chrome Android/iPad) ──
+async function tryNewSensorAPI() {
+  if (!('AbsoluteOrientationSensor' in window)) return false;
+  try {
+    // Request all three permissions it needs
+    const perms = await Promise.all([
+      navigator.permissions.query({ name: 'accelerometer' }),
+      navigator.permissions.query({ name: 'magnetometer' }),
+      navigator.permissions.query({ name: 'gyroscope' }),
+    ]);
+    if (perms.some(p => p.state === 'denied')) return false;
+
+    const sensor = new AbsoluteOrientationSensor({ frequency: 20, referenceFrame: 'screen' });
+    sensor.addEventListener('reading', () => {
+      const [x, y, z, w] = sensor.quaternion;
+      let h = Math.atan2(2*(w*z + x*y), 1 - 2*(y*y + z*z)) * 180 / Math.PI;
+      h = (360 - ((h + 360) % 360)) % 360;
+      onAbsolute(h, 'AbsoluteOrientationSensor');
+      eventCount++;
+    });
+    sensor.addEventListener('error', e => {
+      method = 'sensor error: ' + e.error?.name;
+    });
+    sensor.start();
+    return true;
+  } catch(e) {
+    return false;
+  }
+}
+
+// ── Draw ──
 function draw() {
   const W = canvas.width, H = canvas.height;
   ctx.clearRect(0, 0, W, H);
-
-  const heading = getHeading();
+  const hdg = getHeading();
   const FOV = 70;
 
-  if (heading !== null) {
+  if (hdg !== null) {
     for (const p of PLACES) {
       const brg = bearing(userLat, userLng, p.lat, p.lng);
       const d   = dist(userLat, userLng, p.lat, p.lng);
-
-      let diff = brg - heading;
+      let diff  = brg - hdg;
       if (diff >  180) diff -= 360;
       if (diff < -180) diff += 360;
-
       if (Math.abs(diff) > FOV / 2) continue;
 
       const x = W * (0.5 + diff / FOV);
       const y = H * 0.42;
 
-      // Glow ring
-      ctx.beginPath();
-      ctx.arc(x, y, 38, 0, Math.PI * 2);
-      ctx.strokeStyle = p.color;
-      ctx.lineWidth = 2;
       ctx.globalAlpha = 0.25;
-      ctx.stroke();
+      ctx.beginPath(); ctx.arc(x, y, 38, 0, Math.PI*2);
+      ctx.strokeStyle = p.color; ctx.lineWidth = 2; ctx.stroke();
 
-      // Dot
-      ctx.beginPath();
-      ctx.arc(x, y, 14, 0, Math.PI * 2);
-      ctx.fillStyle = p.color;
       ctx.globalAlpha = 0.9;
-      ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y, 14, 0, Math.PI*2);
+      ctx.fillStyle = p.color; ctx.fill();
 
-      // Label pill
       ctx.globalAlpha = 0.85;
       ctx.fillStyle = 'rgba(0,0,0,0.65)';
-      ctx.beginPath();
-      ctx.roundRect(x - 62, y + 22, 124, 38, 6);
-      ctx.fill();
+      ctx.beginPath(); ctx.roundRect(x-62, y+22, 124, 38, 6); ctx.fill();
 
-      ctx.globalAlpha = 1;
-      ctx.textAlign = 'center';
-      ctx.font = 'bold 12px sans-serif';
-      ctx.fillStyle = '#fff';
-      ctx.fillText(p.name, x, y + 37);
-      ctx.font = '11px sans-serif';
-      ctx.fillStyle = p.color;
-      ctx.fillText(fmtDist(d), x, y + 52);
+      ctx.globalAlpha = 1; ctx.textAlign = 'center';
+      ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = '#fff';
+      ctx.fillText(p.name, x, y+37);
+      ctx.font = '11px sans-serif'; ctx.fillStyle = p.color;
+      ctx.fillText(fmtDist(d), x, y+52);
     }
   }
 
-  // Crosshair
-  ctx.globalAlpha = 0.4;
-  ctx.strokeStyle = '#fff';
-  ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(W/2, H/2-18); ctx.lineTo(W/2, H/2+18); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(W/2-18, H/2); ctx.lineTo(W/2+18, H/2); ctx.stroke();
+  ctx.globalAlpha = 0.4; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(W/2,H/2-18); ctx.lineTo(W/2,H/2+18); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(W/2-18,H/2); ctx.lineTo(W/2+18,H/2); ctx.stroke();
   ctx.globalAlpha = 1;
 
-  const hdg = heading != null ? Math.round(heading) + '°' : 'not calibrated';
-  const raw = rawAlpha != null ? Math.round(rawAlpha) + '°' : 'waiting…';
+  const h = hdg != null ? Math.round(hdg)+'°' : 'none';
+  const r = rawAlpha != null ? Math.round(rawAlpha)+'°' : 'waiting';
   document.getElementById('debug').textContent =
-    `Heading: ${hdg}  |  Raw α: ${raw}  |  ${userLat.toFixed(4)}, ${userLng.toFixed(4)}`;
+    `method:${method} | events:${eventCount} | hdg:${h} | raw:${r} | ${userLat.toFixed(4)},${userLng.toFixed(4)}`;
 
   requestAnimationFrame(draw);
 }
 
-function attachOrientation() {
-  const handle = e => {
-    if (typeof e.webkitCompassHeading === 'number' && e.webkitCompassHeading >= 0) {
-      iosMode = true;
-      calibrated = true;
-      window._iosHeading = e.webkitCompassHeading;
-      document.getElementById('p2').classList.add('hidden');
-      document.getElementById('recalib').style.display = 'none';
-      return;
-    }
-    if (e.absolute === true && e.alpha != null) {
-      rawAlpha   = (360 - e.alpha) % 360;
-      northAlpha = 0;
-      calibrated = true;
-      document.getElementById('p2').classList.add('hidden');
-      document.getElementById('recalib').style.display = 'block';
-      return;
-    }
-    if (e.alpha != null) {
-      rawAlpha = e.alpha;
-    }
-  };
-
-  window.addEventListener('deviceorientationabsolute', handle, true);
-  window.addEventListener('deviceorientation', handle, true);
+function bearing(lat1,lon1,lat2,lon2) {
+  const R=Math.PI/180, dL=(lon2-lon1)*R;
+  const y=Math.sin(dL)*Math.cos(lat2*R);
+  const x=Math.cos(lat1*R)*Math.sin(lat2*R)-Math.sin(lat1*R)*Math.cos(lat2*R)*Math.cos(dL);
+  return (Math.atan2(y,x)*180/Math.PI+360)%360;
 }
+function dist(lat1,lon1,lat2,lon2) {
+  const R=6371000,r=Math.PI/180;
+  const dφ=(lat2-lat1)*r, dλ=(lon2-lon1)*r;
+  const a=Math.sin(dφ/2)**2+Math.cos(lat1*r)*Math.cos(lat2*r)*Math.sin(dλ/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+function fmtDist(m) { return m<1000?Math.round(m)+'m':(m/1000).toFixed(1)+'km'; }
 
 function initGPS() {
   if (!navigator.geolocation) return;
-  navigator.geolocation.watchPosition(pos => {
-    userLat = pos.coords.latitude;
-    userLng = pos.coords.longitude;
-  }, null, { enableHighAccuracy: true });
+  navigator.geolocation.watchPosition(
+    p => { userLat=p.coords.latitude; userLng=p.coords.longitude; },
+    null, { enableHighAccuracy:true }
+  );
 }
 
 async function startAR() {
   document.getElementById('p1').classList.add('hidden');
 
+  // Camera
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: 'environment' } }, audio: false
-    });
-    document.getElementById('vid').srcObject = stream;
+    const s = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ideal:'environment'} }, audio:false });
+    document.getElementById('vid').srcObject = s;
   } catch(e) {}
 
+  // iOS 13+ motion permission
   if (typeof DeviceOrientationEvent?.requestPermission === 'function') {
     try {
       const s = await DeviceOrientationEvent.requestPermission();
-      if (s === 'granted') attachOrientation();
-    } catch(e) {}
+      if (s === 'granted') { attachListeners(); method = 'iOS perm granted'; }
+      else method = 'iOS perm denied';
+    } catch(e) { method = 'iOS perm error'; }
   } else {
-    attachOrientation();
+    // Try new Sensor API first, fall back to events
+    const got = await tryNewSensorAPI();
+    if (!got) { attachListeners(); method = 'event listeners attached'; }
   }
 
   initGPS();
 
-  // Short pause to let first sensor event arrive before showing calibration
-  setTimeout(() => {
-    if (!calibrated) showCalib();
-  }, 600);
+  // Show calibration screen after 1.5s if no absolute heading yet
+  setTimeout(() => { if (!calibrated) showCalib(); }, 1500);
 
   draw();
 }
