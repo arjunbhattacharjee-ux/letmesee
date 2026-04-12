@@ -10,6 +10,7 @@ body { background:#000; overflow:hidden; font-family:sans-serif; color:#fff; }
 video  { position:fixed; inset:0; width:100%; height:100%; object-fit:cover; z-index:0; }
 canvas { position:fixed; inset:0; width:100%; height:100%; z-index:1; pointer-events:none; }
 
+/* Start screen */
 #p1 {
   position:fixed; inset:0; z-index:10; background:#000;
   display:flex; flex-direction:column; align-items:center; justify-content:center;
@@ -25,6 +26,7 @@ canvas { position:fixed; inset:0; width:100%; height:100%; z-index:1; pointer-ev
   border:none; border-radius:12px; cursor:pointer;
 }
 
+/* Loading */
 #loading {
   position:fixed; inset:0; z-index:9; background:rgba(0,0,0,0.85);
   display:none; flex-direction:column; align-items:center; justify-content:center;
@@ -38,17 +40,46 @@ canvas { position:fixed; inset:0; width:100%; height:100%; z-index:1; pointer-ev
 }
 @keyframes spin { to { transform:rotate(360deg); } }
 
+/* Category filter bar */
+#filters {
+  position:fixed; bottom:52px; left:0; right:0; z-index:5;
+  display:none;
+  padding:0 10px 6px;
+  overflow-x:auto; white-space:nowrap;
+  -webkit-overflow-scrolling:touch;
+  scrollbar-width:none;
+}
+#filters::-webkit-scrollbar { display:none; }
+#filters.on { display:block; }
+
+.chip {
+  display:inline-flex; align-items:center; gap:5px;
+  padding:7px 13px; margin-right:7px;
+  font-size:12px; font-weight:600; cursor:pointer;
+  border-radius:20px; border:1.5px solid rgba(255,255,255,0.2);
+  background:rgba(0,0,0,0.55); color:rgba(255,255,255,0.55);
+  transition:all .15s; user-select:none; -webkit-user-select:none;
+  backdrop-filter:blur(6px);
+}
+.chip.active {
+  background:rgba(255,255,255,0.92); color:#000;
+  border-color:transparent;
+}
+
+/* Rescan button */
 #rescan {
   position:fixed; top:12px; right:12px; z-index:5;
   background:rgba(0,0,0,0.5); color:#fff;
   border:1px solid rgba(255,255,255,0.3); border-radius:8px;
   padding:8px 14px; font-size:12px; cursor:pointer; display:none;
 }
+
+/* Debug */
 #debug {
-  position:fixed; bottom:8px; left:8px; right:8px; z-index:5;
-  font-size:11px; color:rgba(255,255,255,0.85);
-  background:rgba(0,0,0,0.7); padding:8px 10px;
-  border-radius:8px; line-height:2; font-family:monospace;
+  position:fixed; bottom:8px; left:8px; right:8px; z-index:4;
+  font-size:10px; color:rgba(255,255,255,0.7);
+  background:rgba(0,0,0,0.65); padding:6px 10px;
+  border-radius:8px; line-height:1.9; font-family:monospace;
 }
 </style>
 </head>
@@ -56,7 +87,7 @@ canvas { position:fixed; inset:0; width:100%; height:100%; z-index:1; pointer-ev
 
 <div id="p1">
   <h2>AR Locator</h2>
-  <p>Live nearby places from OpenStreetMap via your GPS.</p>
+  <p>Live nearby places from OpenStreetMap. Point your camera and see what's around you.</p>
   <button id="startBtn" onclick="startAR()">Enable &amp; Start</button>
   <p id="msg" style="font-size:12px;color:#666;min-height:18px"></p>
 </div>
@@ -65,75 +96,175 @@ canvas { position:fixed; inset:0; width:100%; height:100%; z-index:1; pointer-ev
 
 <video id="vid" autoplay playsinline muted></video>
 <canvas id="cv"></canvas>
-<button id="rescan" onclick="fetchPlaces()">⟳ Rescan area</button>
+
+<button id="rescan" onclick="fetchPlaces()">⟳ Rescan</button>
+
+<!-- Category filter chips -->
+<div id="filters"></div>
+
 <div id="debug">Tap Start to begin</div>
 
 <script>
-const ICONS = {
-  restaurant:'🍽️', cafe:'☕', bar:'🍺', fast_food:'🍔',
-  supermarket:'🛒', convenience:'🏪', pharmacy:'💊',
-  hospital:'🏥', hotel:'🏨', bank:'🏦', atm:'💳',
-  mosque:'🕌', church:'⛪', place_of_worship:'🛕',
-  museum:'🏛️', park:'🌳', cinema:'🎬', theatre:'🎭',
-  school:'🏫', university:'🎓', fuel:'⛽',
+// ── Category definitions ──────────────────────────────────────────────────
+const CATEGORIES = [
+  {
+    id:'all', label:'All', icon:'🌐',
+    overpass: null, // special: show everything
+  },
+  {
+    id:'food', label:'Food', icon:'🍽️',
+    tags:{ amenity:['restaurant','fast_food','food_court'] },
+  },
+  {
+    id:'cafe', label:'Cafés', icon:'☕',
+    tags:{ amenity:['cafe'] },
+  },
+  {
+    id:'mall', label:'Malls', icon:'🏬',
+    tags:{ shop:['mall','department_store','supermarket','convenience'] },
+  },
+  {
+    id:'hotel', label:'Hotels', icon:'🏨',
+    tags:{ tourism:['hotel','motel','hostel','guest_house'] },
+  },
+  {
+    id:'worship', label:'Worship', icon:'🕌',
+    tags:{ amenity:['mosque','church','temple','place_of_worship'] },
+  },
+  {
+    id:'health', label:'Health', icon:'💊',
+    tags:{ amenity:['pharmacy','hospital','clinic','doctors'] },
+  },
+  {
+    id:'bank', label:'Bank/ATM', icon:'🏦',
+    tags:{ amenity:['bank','atm'] },
+  },
+  {
+    id:'transport', label:'Transport', icon:'🚌',
+    tags:{ amenity:['bus_station','taxi','parking','fuel'] },
+  },
+  {
+    id:'leisure', label:'Leisure', icon:'🎭',
+    tags:{ amenity:['cinema','theatre','nightclub'], tourism:['attraction','museum'] },
+  },
+];
+
+const ICON_MAP = {
+  restaurant:'🍽️', fast_food:'🍔', food_court:'🍱',
+  cafe:'☕', bar:'🍺',
+  mall:'🏬', department_store:'🏬', supermarket:'🛒', convenience:'🏪',
+  hotel:'🏨', motel:'🏨', hostel:'🛏️', guest_house:'🏠',
+  mosque:'🕌', church:'⛪', temple:'🛕', place_of_worship:'🛕',
+  pharmacy:'💊', hospital:'🏥', clinic:'🩺', doctors:'👨‍⚕️',
+  bank:'🏦', atm:'💳',
+  bus_station:'🚌', taxi:'🚕', parking:'🅿️', fuel:'⛽',
+  cinema:'🎬', theatre:'🎭', nightclub:'🎶', attraction:'⭐', museum:'🏛️',
 };
+
 function iconFor(tags) {
   for (const k of ['amenity','shop','tourism','leisure']) {
-    if (tags[k] && ICONS[tags[k]]) return ICONS[tags[k]];
+    if (tags[k] && ICON_MAP[tags[k]]) return ICON_MAP[tags[k]];
   }
   return '📍';
 }
 function nameFor(tags) {
   return tags.name || tags['name:en'] || null;
 }
+function catFor(tags) {
+  for (const cat of CATEGORIES) {
+    if (!cat.tags) continue;
+    for (const [key, vals] of Object.entries(cat.tags)) {
+      if (vals.includes(tags[key])) return cat.id;
+    }
+  }
+  return 'other';
+}
 
-const COLORS = ['#ff4444','#44aaff','#44ff88','#ffaa00','#ff44ff','#00ffcc','#ffff44','#ff8844'];
+const COLORS = ['#ff4444','#44aaff','#44ff88','#ffaa00','#ff44ff','#00ffcc','#ffff44','#ff8844','#aa88ff','#ff88aa'];
 
 const canvas = document.getElementById('cv');
 const ctx    = canvas.getContext('2d');
 let userLat  = null, userLng = null;
 let compass  = null;
 let eventCount = 0;
-let places   = [];
+let allPlaces   = [];   // all fetched
+let activeFilter = 'all';
 
 function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
 window.addEventListener('resize', resize);
 resize();
 
+function visiblePlaces() {
+  if (activeFilter === 'all') return allPlaces;
+  return allPlaces.filter(p => p.catId === activeFilter);
+}
+
+// ── Build filter chips ────────────────────────────────────────────────────
+function buildFilters() {
+  const bar = document.getElementById('filters');
+  bar.innerHTML = '';
+  CATEGORIES.forEach(cat => {
+    const chip = document.createElement('div');
+    chip.className = 'chip' + (cat.id === activeFilter ? ' active' : '');
+    chip.innerHTML = `${cat.icon} ${cat.label}`;
+    chip.onclick = () => {
+      activeFilter = cat.id;
+      document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+    };
+    bar.appendChild(chip);
+  });
+  bar.classList.add('on');
+}
+
+// ── Overpass fetch ────────────────────────────────────────────────────────
 async function fetchPlaces() {
   if (!userLat || !userLng) return;
   document.getElementById('loading').classList.add('on');
   document.getElementById('loadmsg').textContent = 'Fetching nearby places…';
 
+  const R = 500;
+  const ll = `${userLat},${userLng}`;
+
   const query = `
-    [out:json][timeout:15];
+    [out:json][timeout:20];
     (
-      node["amenity"](around:400,${userLat},${userLng});
-      node["shop"](around:400,${userLat},${userLng});
-      node["tourism"](around:400,${userLat},${userLng});
+      node["amenity"](around:${R},${ll});
+      node["shop"](around:${R},${ll});
+      node["tourism"](around:${R},${ll});
+      node["leisure"](around:${R},${ll});
     );
-    out body 40;
+    out body 60;
   `;
+
   try {
     const res = await fetch('https://overpass-api.de/api/interpreter', {
       method:'POST', body:'data='+encodeURIComponent(query)
     });
     const json = await res.json();
-    places = (json.elements || [])
-      .filter(e => e.lat && e.lon && nameFor(e.tags))
-      .map(e => ({ name:nameFor(e.tags), icon:iconFor(e.tags), lat:e.lat, lng:e.lon }))
-      .sort((a,b) => dist(userLat,userLng,a.lat,a.lng) - dist(userLat,userLng,b.lat,b.lng))
-      .slice(0, 15);
 
-    document.getElementById('loadmsg').textContent = `Found ${places.length} places`;
-    setTimeout(() => document.getElementById('loading').classList.remove('on'), 600);
+    allPlaces = (json.elements || [])
+      .filter(e => e.lat && e.lon && nameFor(e.tags))
+      .map(e => ({
+        name:  nameFor(e.tags),
+        icon:  iconFor(e.tags),
+        catId: catFor(e.tags),
+        lat:   e.lat,
+        lng:   e.lon,
+      }))
+      .sort((a,b) => gDist(userLat,userLng,a.lat,a.lng) - gDist(userLat,userLng,b.lat,b.lng))
+      .slice(0, 40);
+
+    document.getElementById('loadmsg').textContent = `Found ${allPlaces.length} places`;
+    setTimeout(() => document.getElementById('loading').classList.remove('on'), 500);
     document.getElementById('rescan').style.display = 'block';
   } catch(e) {
-    document.getElementById('loadmsg').textContent = 'Failed — check connection';
+    document.getElementById('loadmsg').textContent = 'Fetch failed — check connection';
     setTimeout(() => document.getElementById('loading').classList.remove('on'), 1500);
   }
 }
 
+// ── Orientation ───────────────────────────────────────────────────────────
 function onOrientation(e) {
   eventCount++;
   if (typeof e.webkitCompassHeading === 'number' && e.webkitCompassHeading >= 0) {
@@ -145,6 +276,7 @@ function onOrientation(e) {
   }
 }
 
+// ── Start ─────────────────────────────────────────────────────────────────
 async function startAR() {
   document.getElementById('msg').textContent = 'Starting…';
 
@@ -162,7 +294,7 @@ async function startAR() {
       if (r === 'granted') {
         window.addEventListener('deviceorientation', onOrientation, true);
       } else {
-        document.getElementById('msg').textContent = '⚠ Motion denied — Settings > Safari > Motion';
+        document.getElementById('msg').textContent = '⚠ Motion denied — Settings › Safari › Motion';
         return;
       }
     } catch(e) { return; }
@@ -182,19 +314,22 @@ async function startAR() {
   }, null, { enableHighAccuracy:true });
 
   document.getElementById('p1').classList.add('hidden');
+  buildFilters();
   draw();
 }
 
+// ── Draw ──────────────────────────────────────────────────────────────────
 function draw() {
   const W = canvas.width, H = canvas.height;
   ctx.clearRect(0, 0, W, H);
   const FOV = 60;
 
-  if (compass !== null && userLat && places.length > 0) {
+  if (compass !== null && userLat) {
+    const places = visiblePlaces();
     for (let i = 0; i < places.length; i++) {
       const p = places[i];
       const brg = bearing(userLat, userLng, p.lat, p.lng);
-      const d   = dist(userLat, userLng, p.lat, p.lng);
+      const d   = gDist(userLat, userLng, p.lat, p.lng);
 
       let diff = brg - compass;
       if (diff >  180) diff -= 360;
@@ -202,25 +337,29 @@ function draw() {
       if (Math.abs(diff) > FOV / 2) continue;
 
       const x = W * (0.5 + diff / FOV);
-      const yFrac = 0.65 - 0.28 * Math.min(1, Math.max(0, (d - 20) / 380));
+      const yFrac = 0.65 - 0.28 * Math.min(1, Math.max(0, (d - 20) / 480));
       const y = H * yFrac;
       const color = COLORS[i % COLORS.length];
 
-      ctx.globalAlpha = 0.15;
+      // Rings
+      ctx.globalAlpha = 0.12;
       ctx.beginPath(); ctx.arc(x, y, 46, 0, Math.PI*2);
       ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke();
 
-      ctx.globalAlpha = 0.4;
+      ctx.globalAlpha = 0.35;
       ctx.beginPath(); ctx.arc(x, y, 28, 0, Math.PI*2);
       ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.stroke();
 
+      // Dot
       ctx.globalAlpha = 1;
       ctx.beginPath(); ctx.arc(x, y, 14, 0, Math.PI*2);
       ctx.fillStyle = color; ctx.fill();
 
+      // Icon
       ctx.font = '13px sans-serif'; ctx.textAlign = 'center';
       ctx.fillText(p.icon, x, y + 5);
 
+      // Label pill
       ctx.globalAlpha = 0.88;
       ctx.fillStyle = 'rgba(0,0,0,0.72)';
       ctx.beginPath(); ctx.roundRect(x-64, y+18, 128, 40, 7); ctx.fill();
@@ -259,8 +398,9 @@ function draw() {
   }
 
   const gps = userLat ? `${userLat.toFixed(4)},${userLng.toFixed(4)}` : 'waiting…';
+  const showing = visiblePlaces().length;
   document.getElementById('debug').textContent =
-    `compass:${compass!==null?Math.round(compass)+'°':'—'} | events:${eventCount} | places:${places.length} | gps:${gps}`;
+    `compass:${compass!==null?Math.round(compass)+'°':'—'} | events:${eventCount} | showing:${showing}/${allPlaces.length} | gps:${gps}`;
 
   requestAnimationFrame(draw);
 }
@@ -271,7 +411,7 @@ function bearing(la1,lo1,la2,lo2) {
   const x=Math.cos(la1*R)*Math.sin(la2*R)-Math.sin(la1*R)*Math.cos(la2*R)*Math.cos(dL);
   return (Math.atan2(y,x)*180/Math.PI+360)%360;
 }
-function dist(la1,lo1,la2,lo2) {
+function gDist(la1,lo1,la2,lo2) {
   const R=6371000, r=Math.PI/180;
   const dφ=(la2-la1)*r, dλ=(lo2-lo1)*r;
   const a=Math.sin(dφ/2)**2+Math.cos(la1*r)*Math.cos(la2*r)*Math.sin(dλ/2)**2;
