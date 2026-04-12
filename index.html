@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Sensor Test</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#111; color:#fff; font-family:monospace; padding:16px; font-size:13px; }
+h2 { font-size:15px; color:#aaa; margin-bottom:14px; }
+.row { display:flex; justify-content:space-between; padding:9px 0; border-bottom:1px solid #222; }
+.label { color:#666; }
+.val { color:#0f0; }
+.val.bad { color:#f44; }
+.val.warn { color:#fa0; }
+button {
+  display:block; width:100%; margin:10px 0;
+  padding:14px; font-size:14px; font-weight:bold;
+  background:#fff; color:#000; border:none; border-radius:8px; cursor:pointer;
+}
+button.yellow { background:#ffcc00; }
+#log { margin-top:12px; font-size:10px; color:#555; line-height:1.9; }
+</style>
+</head>
+<body>
+<h2>Sensor Diagnostic</h2>
+
+<div class="row"><span class="label">deviceorientation events</span><span class="val bad" id="devori">0</span></div>
+<div class="row"><span class="label">deviceorientationabsolute</span><span class="val bad" id="devabs">0</span></div>
+<div class="row"><span class="label">AbsoluteOrientationSensor</span><span class="val bad" id="absapi">not tried</span></div>
+<div class="row"><span class="label">alpha</span><span class="val" id="alpha">—</span></div>
+<div class="row"><span class="label">e.absolute</span><span class="val" id="eabs">—</span></div>
+<div class="row"><span class="label">webkitCompassHeading</span><span class="val" id="webkit">—</span></div>
+<div class="row"><span class="label">accelerometer perm</span><span class="val" id="perm_acc">—</span></div>
+<div class="row"><span class="label">magnetometer perm</span><span class="val" id="perm_mag">—</span></div>
+<div class="row"><span class="label">gyroscope perm</span><span class="val" id="perm_gyr">—</span></div>
+<div class="row"><span class="label">iOS requestPermission API</span><span class="val" id="iosapi">—</span></div>
+
+<button onclick="reqIOS()">Request iOS Motion Permission</button>
+<button class="yellow" onclick="trySensorAPI()">Try AbsoluteOrientationSensor</button>
+
+<div id="log"></div>
+
+<script>
+let oriCount = 0, absCount = 0;
+
+function log(msg) {
+  document.getElementById('log').innerHTML += `<div>${new Date().toLocaleTimeString()} — ${msg}</div>`;
+}
+
+function set(id, val, cls) {
+  const el = document.getElementById(id);
+  el.textContent = val;
+  el.className = 'val' + (cls ? ' ' + cls : '');
+}
+
+// Check iOS permission API
+set('iosapi', typeof DeviceOrientationEvent?.requestPermission === 'function' ? 'YES' : 'no', 
+    typeof DeviceOrientationEvent?.requestPermission === 'function' ? '' : 'warn');
+
+// Attach orientation listeners immediately
+window.addEventListener('deviceorientation', e => {
+  oriCount++;
+  set('devori', oriCount + ' events', '');
+  set('alpha', e.alpha != null ? e.alpha.toFixed(1) : 'null', e.alpha != null ? '' : 'bad');
+  set('eabs', String(e.absolute), e.absolute ? '' : 'warn');
+  set('webkit', e.webkitCompassHeading != null ? e.webkitCompassHeading.toFixed(1) : 'null',
+      e.webkitCompassHeading != null ? '' : 'warn');
+  if (oriCount === 1) log('deviceorientation fired! alpha=' + e.alpha);
+}, true);
+
+window.addEventListener('deviceorientationabsolute', e => {
+  absCount++;
+  set('devabs', absCount + ' events', '');
+  if (absCount === 1) log('deviceorientationabsolute fired! alpha=' + e.alpha);
+}, true);
+
+// Check permissions state (non-blocking)
+async function checkPerms() {
+  const names = ['accelerometer','magnetometer','gyroscope'];
+  const ids   = ['perm_acc','perm_mag','perm_gyr'];
+  for (let i = 0; i < names.length; i++) {
+    try {
+      const r = await navigator.permissions.query({ name: names[i] });
+      set(ids[i], r.state, r.state === 'granted' ? '' : r.state === 'denied' ? 'bad' : 'warn');
+      log(names[i] + ' permission: ' + r.state);
+    } catch(e) {
+      set(ids[i], 'not supported', 'warn');
+    }
+  }
+}
+checkPerms();
+
+async function reqIOS() {
+  if (typeof DeviceOrientationEvent?.requestPermission !== 'function') {
+    log('iOS requestPermission not available on this device');
+    return;
+  }
+  try {
+    const s = await DeviceOrientationEvent.requestPermission();
+    log('iOS permission result: ' + s);
+    if (s === 'granted') {
+      window.addEventListener('deviceorientation', () => {}, true);
+      log('Listener attached after iOS grant');
+    }
+  } catch(e) { log('iOS permission error: ' + e); }
+}
+
+async function trySensorAPI() {
+  if (!('AbsoluteOrientationSensor' in window)) {
+    set('absapi', 'not available', 'bad');
+    log('AbsoluteOrientationSensor not in window');
+    return;
+  }
+  try {
+    const sensor = new AbsoluteOrientationSensor({ frequency: 10 });
+    sensor.addEventListener('reading', () => {
+      set('absapi', 'WORKING ✓', '');
+      log('AbsoluteOrientationSensor reading: q=' + sensor.quaternion.map(x=>x.toFixed(2)));
+    });
+    sensor.addEventListener('error', e => {
+      set('absapi', 'error: ' + e.error?.name, 'bad');
+      log('Sensor error: ' + e.error?.name + ' — ' + e.error?.message);
+    });
+    sensor.start();
+    set('absapi', 'started…', 'warn');
+    log('AbsoluteOrientationSensor started');
+  } catch(e) {
+    set('absapi', 'exception: ' + e.name, 'bad');
+    log('Exception: ' + e);
+  }
+}
+
+// Report if nothing fires after 3s
+setTimeout(() => {
+  if (oriCount === 0) log('⚠ No deviceorientation after 3s');
+  if (absCount === 0) log('⚠ No deviceorientationabsolute after 3s');
+}, 3000);
+
+log('Page loaded. Waiting for events…');
+</script>
+</body>
+</html>
