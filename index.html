@@ -18,7 +18,6 @@ canvas { position:fixed; inset:0; width:100%; height:100%; z-index:1; pointer-ev
 #p1.hidden { display:none; }
 #p1 h2 { font-size:24px; }
 #p1 p  { font-size:14px; color:#999; line-height:1.9; max-width:290px; }
-
 #startBtn {
   width:100%; max-width:300px; padding:20px;
   font-size:18px; font-weight:bold;
@@ -26,10 +25,29 @@ canvas { position:fixed; inset:0; width:100%; height:100%; z-index:1; pointer-ev
   border:none; border-radius:12px; cursor:pointer;
 }
 
+#loading {
+  position:fixed; inset:0; z-index:9; background:rgba(0,0,0,0.85);
+  display:none; flex-direction:column; align-items:center; justify-content:center;
+  gap:16px; font-size:14px; color:#aaa;
+}
+#loading.on { display:flex; }
+.spinner {
+  width:40px; height:40px; border:3px solid #333;
+  border-top-color:#fff; border-radius:50%;
+  animation:spin .8s linear infinite;
+}
+@keyframes spin { to { transform:rotate(360deg); } }
+
+#rescan {
+  position:fixed; top:12px; right:12px; z-index:5;
+  background:rgba(0,0,0,0.5); color:#fff;
+  border:1px solid rgba(255,255,255,0.3); border-radius:8px;
+  padding:8px 14px; font-size:12px; cursor:pointer; display:none;
+}
 #debug {
   position:fixed; bottom:8px; left:8px; right:8px; z-index:5;
-  font-size:12px; color:rgba(255,255,255,0.9);
-  background:rgba(0,0,0,0.7); padding:10px 12px;
+  font-size:11px; color:rgba(255,255,255,0.85);
+  background:rgba(0,0,0,0.7); padding:8px 10px;
   border-radius:8px; line-height:2; font-family:monospace;
 }
 </style>
@@ -38,88 +56,130 @@ canvas { position:fixed; inset:0; width:100%; height:100%; z-index:1; pointer-ev
 
 <div id="p1">
   <h2>AR Locator</h2>
-  <p>Tap to enable compass and camera. Dots will appear showing nearby locations as you turn.</p>
+  <p>Live nearby places from OpenStreetMap via your GPS.</p>
   <button id="startBtn" onclick="startAR()">Enable &amp; Start</button>
   <p id="msg" style="font-size:12px;color:#666;min-height:18px"></p>
 </div>
 
+<div id="loading"><div class="spinner"></div><span id="loadmsg">Loading…</span></div>
+
 <video id="vid" autoplay playsinline muted></video>
 <canvas id="cv"></canvas>
+<button id="rescan" onclick="fetchPlaces()">⟳ Rescan area</button>
 <div id="debug">Tap Start to begin</div>
 
 <script>
-const PLACES = [
-  { name:'Burj Khalifa',    lat:25.197197, lng:55.274376, color:'#ff4444' },
-  { name:'Dubai Mall',      lat:25.198765, lng:55.279503, color:'#44aaff' },
-  { name:'Dubai Opera',     lat:25.194987, lng:55.272345, color:'#44ff88' },
-  { name:'Armani Hotel',    lat:25.196500, lng:55.273800, color:'#ffaa00' },
-  { name:'Emirates Towers', lat:25.217345, lng:55.282123, color:'#ff44ff' },
-];
+const ICONS = {
+  restaurant:'🍽️', cafe:'☕', bar:'🍺', fast_food:'🍔',
+  supermarket:'🛒', convenience:'🏪', pharmacy:'💊',
+  hospital:'🏥', hotel:'🏨', bank:'🏦', atm:'💳',
+  mosque:'🕌', church:'⛪', place_of_worship:'🛕',
+  museum:'🏛️', park:'🌳', cinema:'🎬', theatre:'🎭',
+  school:'🏫', university:'🎓', fuel:'⛽',
+};
+function iconFor(tags) {
+  for (const k of ['amenity','shop','tourism','leisure']) {
+    if (tags[k] && ICONS[tags[k]]) return ICONS[tags[k]];
+  }
+  return '📍';
+}
+function nameFor(tags) {
+  return tags.name || tags['name:en'] || null;
+}
+
+const COLORS = ['#ff4444','#44aaff','#44ff88','#ffaa00','#ff44ff','#00ffcc','#ffff44','#ff8844'];
 
 const canvas = document.getElementById('cv');
 const ctx    = canvas.getContext('2d');
-let userLat  = 25.2120, userLng = 55.2817;
+let userLat  = null, userLng = null;
 let compass  = null;
 let eventCount = 0;
+let places   = [];
 
-function resize() {
-  canvas.width  = window.innerWidth;
-  canvas.height = window.innerHeight;
-}
+function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
 window.addEventListener('resize', resize);
 resize();
 
-// Called on every single orientation event — keeps compass live
+async function fetchPlaces() {
+  if (!userLat || !userLng) return;
+  document.getElementById('loading').classList.add('on');
+  document.getElementById('loadmsg').textContent = 'Fetching nearby places…';
+
+  const query = `
+    [out:json][timeout:15];
+    (
+      node["amenity"](around:400,${userLat},${userLng});
+      node["shop"](around:400,${userLat},${userLng});
+      node["tourism"](around:400,${userLat},${userLng});
+    );
+    out body 40;
+  `;
+  try {
+    const res = await fetch('https://overpass-api.de/api/interpreter', {
+      method:'POST', body:'data='+encodeURIComponent(query)
+    });
+    const json = await res.json();
+    places = (json.elements || [])
+      .filter(e => e.lat && e.lon && nameFor(e.tags))
+      .map(e => ({ name:nameFor(e.tags), icon:iconFor(e.tags), lat:e.lat, lng:e.lon }))
+      .sort((a,b) => dist(userLat,userLng,a.lat,a.lng) - dist(userLat,userLng,b.lat,b.lng))
+      .slice(0, 15);
+
+    document.getElementById('loadmsg').textContent = `Found ${places.length} places`;
+    setTimeout(() => document.getElementById('loading').classList.remove('on'), 600);
+    document.getElementById('rescan').style.display = 'block';
+  } catch(e) {
+    document.getElementById('loadmsg').textContent = 'Failed — check connection';
+    setTimeout(() => document.getElementById('loading').classList.remove('on'), 1500);
+  }
+}
+
 function onOrientation(e) {
   eventCount++;
   if (typeof e.webkitCompassHeading === 'number' && e.webkitCompassHeading >= 0) {
     compass = e.webkitCompassHeading;
+  } else if (e.absolute && e.alpha != null) {
+    compass = (360 - e.alpha) % 360;
+  } else if (e.alpha != null) {
+    compass = (360 - e.alpha) % 360;
   }
 }
 
 async function startAR() {
   document.getElementById('msg').textContent = 'Starting…';
 
-  // Camera
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal:'environment' } }, audio: false
+      video:{ facingMode:{ ideal:'environment' } }, audio:false
     });
     document.getElementById('vid').srcObject = stream;
-  } catch(e) {
-    document.getElementById('msg').textContent = 'No camera — using black background';
-  }
+  } catch(e) {}
 
-  // iOS motion permission — MUST be called directly from tap
   if (typeof DeviceOrientationEvent !== 'undefined' &&
       typeof DeviceOrientationEvent.requestPermission === 'function') {
     try {
-      const result = await DeviceOrientationEvent.requestPermission();
-      if (result === 'granted') {
-        // Attach listener — fires ~60x per second as device moves
+      const r = await DeviceOrientationEvent.requestPermission();
+      if (r === 'granted') {
         window.addEventListener('deviceorientation', onOrientation, true);
-        document.getElementById('msg').textContent = 'Compass active ✓';
       } else {
-        document.getElementById('msg').textContent = '⚠ Motion denied. Go to Settings > Safari > Motion & Orientation Access';
+        document.getElementById('msg').textContent = '⚠ Motion denied — Settings > Safari > Motion';
         return;
       }
-    } catch(e) {
-      document.getElementById('msg').textContent = 'Error: ' + e.message;
-      return;
-    }
+    } catch(e) { return; }
   } else {
-    // Android / non-iOS
     window.addEventListener('deviceorientationabsolute', onOrientation, true);
-    window.addEventListener('deviceorientation',         onOrientation, true);
+    window.addEventListener('deviceorientation', onOrientation, true);
   }
 
-  // GPS
-  if (navigator.geolocation) {
-    navigator.geolocation.watchPosition(
-      p => { userLat = p.coords.latitude; userLng = p.coords.longitude; },
-      null, { enableHighAccuracy: true }
-    );
-  }
+  document.getElementById('loading').classList.add('on');
+  document.getElementById('loadmsg').textContent = 'Getting GPS…';
+
+  navigator.geolocation.watchPosition(pos => {
+    const first = !userLat;
+    userLat = pos.coords.latitude;
+    userLng = pos.coords.longitude;
+    if (first) fetchPlaces();
+  }, null, { enableHighAccuracy:true });
 
   document.getElementById('p1').classList.add('hidden');
   draw();
@@ -128,99 +188,96 @@ async function startAR() {
 function draw() {
   const W = canvas.width, H = canvas.height;
   ctx.clearRect(0, 0, W, H);
+  const FOV = 60;
 
-  const FOV = 60; // degrees visible left-right
-
-  if (compass !== null) {
-    for (const p of PLACES) {
+  if (compass !== null && userLat && places.length > 0) {
+    for (let i = 0; i < places.length; i++) {
+      const p = places[i];
       const brg = bearing(userLat, userLng, p.lat, p.lng);
       const d   = dist(userLat, userLng, p.lat, p.lng);
 
-      // How many degrees is this place from where we're pointing?
       let diff = brg - compass;
       if (diff >  180) diff -= 360;
       if (diff < -180) diff += 360;
-
-      // Only show if within FOV
       if (Math.abs(diff) > FOV / 2) continue;
 
-      // Map to screen X: diff=0 → centre, diff=±FOV/2 → edges
       const x = W * (0.5 + diff / FOV);
-      const y = H * 0.40;
+      const yFrac = 0.65 - 0.28 * Math.min(1, Math.max(0, (d - 20) / 380));
+      const y = H * yFrac;
+      const color = COLORS[i % COLORS.length];
 
-      // Outer glow
-      ctx.globalAlpha = 0.2;
-      ctx.beginPath(); ctx.arc(x, y, 44, 0, Math.PI*2);
-      ctx.strokeStyle = p.color; ctx.lineWidth = 2; ctx.stroke();
+      ctx.globalAlpha = 0.15;
+      ctx.beginPath(); ctx.arc(x, y, 46, 0, Math.PI*2);
+      ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke();
 
-      // Middle ring
       ctx.globalAlpha = 0.4;
       ctx.beginPath(); ctx.arc(x, y, 28, 0, Math.PI*2);
-      ctx.strokeStyle = p.color; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.stroke();
 
-      // Solid dot
       ctx.globalAlpha = 1;
-      ctx.beginPath(); ctx.arc(x, y, 12, 0, Math.PI*2);
-      ctx.fillStyle = p.color; ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y, 14, 0, Math.PI*2);
+      ctx.fillStyle = color; ctx.fill();
 
-      // Label pill
+      ctx.font = '13px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(p.icon, x, y + 5);
+
       ctx.globalAlpha = 0.88;
-      ctx.fillStyle = 'rgba(0,0,0,0.7)';
-      ctx.beginPath(); ctx.roundRect(x - 64, y + 20, 128, 40, 7); ctx.fill();
+      ctx.fillStyle = 'rgba(0,0,0,0.72)';
+      ctx.beginPath(); ctx.roundRect(x-64, y+18, 128, 40, 7); ctx.fill();
 
       ctx.globalAlpha = 1; ctx.textAlign = 'center';
-      ctx.font = 'bold 13px sans-serif'; ctx.fillStyle = '#fff';
-      ctx.fillText(p.name, x, y + 36);
-      ctx.font = '11px sans-serif'; ctx.fillStyle = p.color;
-      ctx.fillText(fmtDist(d), x, y + 52);
+      ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = '#fff';
+      ctx.fillText(p.name.length > 18 ? p.name.slice(0,16)+'…' : p.name, x, y+34);
+      ctx.font = '11px sans-serif'; ctx.fillStyle = color;
+      ctx.fillText(fmtDist(d), x, y+49);
     }
   }
 
   // Crosshair
-  ctx.globalAlpha = 0.35; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(W/2, H/2-20); ctx.lineTo(W/2, H/2+20); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(W/2-20, H/2); ctx.lineTo(W/2+20, H/2); ctx.stroke();
+  ctx.globalAlpha = 0.3; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(W/2,H/2-20); ctx.lineTo(W/2,H/2+20); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(W/2-20,H/2); ctx.lineTo(W/2+20,H/2); ctx.stroke();
   ctx.globalAlpha = 1;
 
-  // Heading arc at top — shows which direction you're facing
+  // Compass bar
   if (compass !== null) {
     const dirs = [{l:'N',b:0},{l:'NE',b:45},{l:'E',b:90},{l:'SE',b:135},
                   {l:'S',b:180},{l:'SW',b:225},{l:'W',b:270},{l:'NW',b:315}];
-    ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center';
     for (const d of dirs) {
       let diff = d.b - compass;
       if (diff >  180) diff -= 360;
       if (diff < -180) diff += 360;
-      if (Math.abs(diff) > FOV / 2) continue;
+      if (Math.abs(diff) > FOV/2) continue;
       const x = W * (0.5 + diff / FOV);
-      ctx.globalAlpha = d.l.length === 1 ? 0.9 : 0.4;
-      ctx.fillStyle = d.l === 'N' ? '#ff4444' : '#fff';
-      ctx.fillText(d.l, x, 36);
+      ctx.globalAlpha = d.l.length===1 ? 0.9 : 0.45;
+      ctx.font = `bold ${d.l.length===1?14:11}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = d.l==='N' ? '#ff4444' : '#fff';
+      ctx.fillText(d.l, x, 34);
     }
     ctx.globalAlpha = 1;
   }
 
+  const gps = userLat ? `${userLat.toFixed(4)},${userLng.toFixed(4)}` : 'waiting…';
   document.getElementById('debug').textContent =
-    `compass: ${compass !== null ? Math.round(compass) + '°' : '—'} | ` +
-    `events: ${eventCount} | ` +
-    `gps: ${userLat.toFixed(4)}, ${userLng.toFixed(4)}`;
+    `compass:${compass!==null?Math.round(compass)+'°':'—'} | events:${eventCount} | places:${places.length} | gps:${gps}`;
 
   requestAnimationFrame(draw);
 }
 
-function bearing(la1, lo1, la2, lo2) {
-  const R = Math.PI/180, dL = (lo2-lo1)*R;
-  const y = Math.sin(dL)*Math.cos(la2*R);
-  const x = Math.cos(la1*R)*Math.sin(la2*R) - Math.sin(la1*R)*Math.cos(la2*R)*Math.cos(dL);
+function bearing(la1,lo1,la2,lo2) {
+  const R=Math.PI/180, dL=(lo2-lo1)*R;
+  const y=Math.sin(dL)*Math.cos(la2*R);
+  const x=Math.cos(la1*R)*Math.sin(la2*R)-Math.sin(la1*R)*Math.cos(la2*R)*Math.cos(dL);
   return (Math.atan2(y,x)*180/Math.PI+360)%360;
 }
-function dist(la1, lo1, la2, lo2) {
+function dist(la1,lo1,la2,lo2) {
   const R=6371000, r=Math.PI/180;
   const dφ=(la2-la1)*r, dλ=(lo2-lo1)*r;
   const a=Math.sin(dφ/2)**2+Math.cos(la1*r)*Math.cos(la2*r)*Math.sin(dλ/2)**2;
   return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
 }
-function fmtDist(m) { return m<1000 ? Math.round(m)+'m' : (m/1000).toFixed(1)+'km'; }
+function fmtDist(m) { return m<1000?Math.round(m)+'m':(m/1000).toFixed(1)+'km'; }
 </script>
 </body>
 </html>
