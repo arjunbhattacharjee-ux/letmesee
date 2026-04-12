@@ -553,29 +553,86 @@ function gpsStatus(t) { document.getElementById('gtxt').textContent = t; }
    COMPASS / DEVICE ORIENTATION
 
    iOS:     e.webkitCompassHeading  — true bearing 0-360, clockwise ✓
-   Android: e.alpha                 — CCW rotation from magnetic north
-            heading = (360 - alpha) % 360
+   Android: e.absolute === true     — deviceorientationabsolute gives
+            a true north alpha; heading = (360 - alpha) % 360
+            e.absolute === false    — relative alpha; unreliable for AR,
+            but we still use it as a last resort with a warning.
+
+   Screen orientation compensation:
+   Most phones fire alpha relative to portrait-up. When the screen
+   rotates (landscape) we must add the screen angle so cards don't
+   jump when you tilt the phone.
+
+   Smoothing:
+   Raw compass values can jitter ±5°. A simple low-pass filter
+   (90% old / 10% new) removes flicker without adding noticeable lag.
 
    Once the first valid reading arrives:
    - compassLive = true
    - FOV switches from 360° → 120°  (cards now only show in front of you)
 ───────────────────────────────────────────────────── */
+
+// Low-pass filter state
+let _smoothedHeading = null;
+const SMOOTH_FACTOR = 0.85;   // higher = smoother but slightly more lag
+
+function _smoothHeading(raw) {
+  if (_smoothedHeading === null) { _smoothedHeading = raw; return raw; }
+  // Handle wrap-around (e.g. 355° → 5°) correctly
+  let delta = raw - _smoothedHeading;
+  if (delta >  180) delta -= 360;
+  if (delta < -180) delta += 360;
+  _smoothedHeading = (_smoothedHeading + delta * (1 - SMOOTH_FACTOR) + 360) % 360;
+  return _smoothedHeading;
+}
+
+function _screenAngle() {
+  // screen.orientation is the reliable modern API; fallback to window.orientation
+  if (screen.orientation && screen.orientation.angle != null)
+    return screen.orientation.angle;
+  return typeof window.orientation === 'number' ? window.orientation : 0;
+}
+
 function initOrientation() {
   if (typeof DeviceOrientationEvent === 'undefined') return;
 
-  const handler = e => {
+  // Tracks whether we have already registered an absolute listener so we
+  // don't double-count events from both absolute + relative listeners.
+  let absoluteAttached = false;
+
+  const makeHandler = (isAbsolute) => (e) => {
+    // If an absolute source has already fired, ignore relative events
+    if (!isAbsolute && absoluteAttached) return;
+
     let h = null;
+
+    // ── iOS ──────────────────────────────────────────────────────────────
     if (typeof e.webkitCompassHeading === 'number' && e.webkitCompassHeading >= 0) {
-      h = e.webkitCompassHeading;               // iOS
-    } else if (e.alpha != null) {
-      h = (360 - e.alpha + 360) % 360;          // Android
+      h = e.webkitCompassHeading;  // already true-north, clockwise, no correction needed
+
+    // ── Android / absolute ───────────────────────────────────────────────
+    } else if (e.alpha != null && (isAbsolute || e.absolute === true)) {
+      // alpha is CCW from magnetic/true north → convert to CW bearing
+      h = (360 - e.alpha) % 360;
+      // Compensate for screen rotation (landscape mode etc.)
+      h = (h + _screenAngle() + 360) % 360;
+
+    // ── Android / relative (last resort) ────────────────────────────────
+    } else if (e.alpha != null && !absoluteAttached) {
+      h = (360 - e.alpha) % 360;
+      h = (h + _screenAngle() + 360) % 360;
+      // Show a subtle warning — relative alpha drifts, AR won't be perfect
+      document.getElementById('hfov').style.color = 'var(--am)';
     }
+
     if (h === null) return;
+
+    h = _smoothHeading(h);
 
     if (!compassLive) {
       compassLive = true;
       FOV = FOV_NARROW;
-      document.getElementById('hfov').textContent  = 'FOV 120°';
+      document.getElementById('hfov').textContent = 'FOV 120°';
       document.getElementById('cmptip').classList.remove('on');
     }
     applyHeading(h);
@@ -584,10 +641,16 @@ function initOrientation() {
   // iOS 13+ requires a user-gesture to grant motion permission
   if (typeof DeviceOrientationEvent.requestPermission === 'function') {
     document.getElementById('cmptip').classList.add('on');
-    window._orientHandler = handler;            // stored; attached in reqCompass()
+    window._orientHandler = makeHandler(true);   // stored; attached in reqCompass()
   } else {
-    window.addEventListener('deviceorientationabsolute', handler, true);
-    window.addEventListener('deviceorientation',         handler, true);
+    // Try absolute first (Chrome Android, Firefox Android with permission)
+    const absHandler = makeHandler(true);
+    window.addEventListener('deviceorientationabsolute', (e) => {
+      absoluteAttached = true;
+      absHandler(e);
+    }, true);
+    // Relative fallback — will be ignored once absoluteAttached flips true
+    window.addEventListener('deviceorientation', makeHandler(false), true);
   }
 }
 
@@ -596,7 +659,10 @@ function reqCompass() {
   DeviceOrientationEvent.requestPermission()
     .then(state => {
       if (state === 'granted' && window._orientHandler) {
-        window.addEventListener('deviceorientation', window._orientHandler, true);
+        // On iOS, webkitCompassHeading comes via standard deviceorientation.
+        // Also listen on absolute variant for future-proofing.
+        window.addEventListener('deviceorientation',         window._orientHandler, true);
+        window.addEventListener('deviceorientationabsolute', window._orientHandler, true);
         toast('COMPASS ON');
       }
     })
