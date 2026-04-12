@@ -8,64 +8,72 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #000; overflow: hidden; font-family: sans-serif; }
 
-video { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
+video  { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
 canvas { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 1; }
 
-#overlay {
-  position: fixed; inset: 0; z-index: 5;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  background: rgba(0,0,0,0.92); color: #fff; gap: 16px; padding: 32px; text-align: center;
+/* Full-screen panels */
+.panel {
+  position: fixed; inset: 0; z-index: 10;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.93); color: #fff;
+  gap: 20px; padding: 40px 32px; text-align: center;
 }
-#overlay h2 { font-size: 20px; }
-#overlay p  { font-size: 13px; color: #aaa; line-height: 1.7; max-width: 280px; }
-#overlay button {
-  padding: 14px 32px; font-size: 15px; background: #fff; color: #000;
-  border: none; border-radius: 8px; cursor: pointer; width: 100%; max-width: 280px;
-}
+.panel.hidden { display: none; }
 
-#calibBanner {
-  position: fixed; top: 0; left: 0; right: 0; z-index: 4;
-  background: rgba(255,170,0,0.95); color: #000;
-  padding: 14px 16px; text-align: center;
-  font-size: 13px; font-weight: bold; line-height: 1.6;
-  display: none;
-}
-#calibBanner button {
-  margin-top: 8px; padding: 10px 24px; font-size: 14px; font-weight: bold;
-  background: #000; color: #fff; border: none; border-radius: 6px; cursor: pointer;
-}
+.panel h2  { font-size: 22px; }
+.panel p   { font-size: 14px; color: #aaa; line-height: 1.8; max-width: 290px; }
+.panel em  { color: #fff; font-style: normal; font-weight: bold; }
 
+.big-btn {
+  width: 100%; max-width: 300px;
+  padding: 18px; font-size: 17px; font-weight: bold;
+  background: #fff; color: #000;
+  border: none; border-radius: 10px; cursor: pointer;
+}
+.big-btn.yellow { background: #ffcc00; color: #000; font-size: 18px; padding: 20px; }
+
+/* Compass rose hint */
+.rose { font-size: 64px; line-height: 1; }
+
+/* Recalibrate button — always visible bottom centre */
 #recalib {
-  position: fixed; bottom: 60px; right: 12px; z-index: 4;
-  background: rgba(255,255,255,0.15); color: #fff;
-  border: 1px solid rgba(255,255,255,0.3); border-radius: 6px;
-  padding: 8px 12px; font-size: 11px; cursor: pointer; display: none;
+  position: fixed; bottom: 54px; left: 50%; transform: translateX(-50%);
+  z-index: 5; background: rgba(255,204,0,0.9); color: #000;
+  border: none; border-radius: 8px; padding: 12px 24px;
+  font-size: 14px; font-weight: bold; cursor: pointer; display: none;
 }
 
 #debug {
-  position: fixed; bottom: 10px; left: 10px; right: 10px; z-index: 3;
-  font-size: 11px; color: rgba(255,255,255,0.75);
-  background: rgba(0,0,0,0.55); padding: 8px 10px; border-radius: 6px; line-height: 1.8;
+  position: fixed; bottom: 8px; left: 8px; right: 8px; z-index: 5;
+  font-size: 11px; color: rgba(255,255,255,0.7);
+  background: rgba(0,0,0,0.55); padding: 7px 10px; border-radius: 6px; line-height: 1.8;
 }
 </style>
 </head>
 <body>
 
-<div id="overlay">
+<!-- Step 1: Start -->
+<div class="panel" id="p1">
   <h2>AR Locator</h2>
-  <p>Shows 5 nearby locations on your camera.<br><br>After starting, point your phone toward <strong style="color:#fff">North</strong> and tap the calibration button.</p>
-  <button onclick="startAR()">Start Camera</button>
+  <p>Shows 5 nearby locations through your camera.</p>
+  <button class="big-btn" onclick="startAR()">Start Camera</button>
 </div>
 
-<div id="calibBanner">
-  🧭 Point your phone toward <strong>North</strong>, then tap:<br>
-  <button onclick="calibrate()">I'm pointing North ✓</button>
+<!-- Step 2: Calibrate (fullscreen, impossible to miss) -->
+<div class="panel hidden" id="p2">
+  <div class="rose">🧭</div>
+  <h2>Point North</h2>
+  <p>Physically rotate your phone until it faces <em>North</em>, then tap the button below.</p>
+  <p style="font-size:12px;color:#666">Use your surroundings or a maps app to find North first.</p>
+  <button class="big-btn yellow" onclick="calibrate()">✓ I am pointing North</button>
 </div>
 
 <video id="vid" autoplay playsinline muted></video>
 <canvas id="cv"></canvas>
-<button id="recalib" onclick="recalibrate()">🧭 Recalibrate</button>
-<div id="debug">Starting…</div>
+
+<button id="recalib" onclick="showCalib()">🧭 Recalibrate North</button>
+<div id="debug">—</div>
 
 <script>
 const PLACES = [
@@ -79,11 +87,11 @@ const PLACES = [
 const canvas = document.getElementById('cv');
 const ctx    = canvas.getContext('2d');
 
-let userLat    = 25.2120, userLng = 55.2817;
-let rawAlpha   = null;   // latest alpha from sensor
-let northAlpha = null;   // alpha when user pointed North
+let userLat = 25.2120, userLng = 55.2817;
+let rawAlpha   = null;
+let northAlpha = null;
 let calibrated = false;
-let iosMode    = false;  // true if webkitCompassHeading works
+let iosMode    = false;
 
 function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
 window.addEventListener('resize', resize);
@@ -95,22 +103,21 @@ function getHeading() {
   return ((rawAlpha - northAlpha) + 360) % 360;
 }
 
+function showCalib() {
+  calibrated = false;
+  document.getElementById('p2').classList.remove('hidden');
+  document.getElementById('recalib').style.display = 'none';
+}
+
 function calibrate() {
   if (rawAlpha == null) {
-    alert('No sensor data yet. Try rotating your phone first.');
+    alert('Sensor not ready yet — try rotating the phone and wait a moment.');
     return;
   }
   northAlpha = rawAlpha;
   calibrated = true;
-  document.getElementById('calibBanner').style.display = 'none';
+  document.getElementById('p2').classList.add('hidden');
   document.getElementById('recalib').style.display = 'block';
-}
-
-function recalibrate() {
-  calibrated = false;
-  northAlpha = null;
-  document.getElementById('calibBanner').style.display = 'block';
-  document.getElementById('recalib').style.display = 'none';
 }
 
 function bearing(lat1, lon1, lat2, lon2) {
@@ -154,7 +161,7 @@ function draw() {
       const x = W * (0.5 + diff / FOV);
       const y = H * 0.42;
 
-      // Outer ring
+      // Glow ring
       ctx.beginPath();
       ctx.arc(x, y, 38, 0, Math.PI * 2);
       ctx.strokeStyle = p.color;
@@ -169,14 +176,13 @@ function draw() {
       ctx.globalAlpha = 0.9;
       ctx.fill();
 
-      // Label background
-      ctx.globalAlpha = 0.82;
+      // Label pill
+      ctx.globalAlpha = 0.85;
       ctx.fillStyle = 'rgba(0,0,0,0.65)';
       ctx.beginPath();
       ctx.roundRect(x - 62, y + 22, 124, 38, 6);
       ctx.fill();
 
-      // Label text
       ctx.globalAlpha = 1;
       ctx.textAlign = 'center';
       ctx.font = 'bold 12px sans-serif';
@@ -189,48 +195,41 @@ function draw() {
   }
 
   // Crosshair
-  ctx.globalAlpha = 0.45;
+  ctx.globalAlpha = 0.4;
   ctx.strokeStyle = '#fff';
   ctx.lineWidth = 1;
   ctx.beginPath(); ctx.moveTo(W/2, H/2-18); ctx.lineTo(W/2, H/2+18); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(W/2-18, H/2); ctx.lineTo(W/2+18, H/2); ctx.stroke();
   ctx.globalAlpha = 1;
 
-  // Debug
-  const hdg = heading != null ? Math.round(heading) + '°' : (calibrated ? '?' : 'tap North to calibrate');
-  const raw = rawAlpha != null ? Math.round(rawAlpha) + '°' : 'waiting for sensor…';
+  const hdg = heading != null ? Math.round(heading) + '°' : 'not calibrated';
+  const raw = rawAlpha != null ? Math.round(rawAlpha) + '°' : 'waiting…';
   document.getElementById('debug').textContent =
-    `Heading: ${hdg}  |  Raw α: ${raw}  |  GPS: ${userLat.toFixed(4)}, ${userLng.toFixed(4)}`;
+    `Heading: ${hdg}  |  Raw α: ${raw}  |  ${userLat.toFixed(4)}, ${userLng.toFixed(4)}`;
 
   requestAnimationFrame(draw);
 }
 
 function attachOrientation() {
   const handle = e => {
-    // iOS real compass
     if (typeof e.webkitCompassHeading === 'number' && e.webkitCompassHeading >= 0) {
       iosMode = true;
       calibrated = true;
       window._iosHeading = e.webkitCompassHeading;
-      document.getElementById('calibBanner').style.display = 'none';
+      document.getElementById('p2').classList.add('hidden');
       document.getElementById('recalib').style.display = 'none';
       return;
     }
-    // Absolute alpha (Android with absolute event)
     if (e.absolute === true && e.alpha != null) {
-      rawAlpha = (360 - e.alpha) % 360;
+      rawAlpha   = (360 - e.alpha) % 360;
       northAlpha = 0;
       calibrated = true;
-      document.getElementById('calibBanner').style.display = 'none';
+      document.getElementById('p2').classList.add('hidden');
       document.getElementById('recalib').style.display = 'block';
       return;
     }
-    // Relative alpha — needs calibration
     if (e.alpha != null) {
       rawAlpha = e.alpha;
-      if (!calibrated) {
-        document.getElementById('calibBanner').style.display = 'block';
-      }
     }
   };
 
@@ -247,7 +246,7 @@ function initGPS() {
 }
 
 async function startAR() {
-  document.getElementById('overlay').style.display = 'none';
+  document.getElementById('p1').classList.add('hidden');
 
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -266,6 +265,12 @@ async function startAR() {
   }
 
   initGPS();
+
+  // Short pause to let first sensor event arrive before showing calibration
+  setTimeout(() => {
+    if (!calibrated) showCalib();
+  }, 600);
+
   draw();
 }
 </script>
