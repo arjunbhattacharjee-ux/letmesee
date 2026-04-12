@@ -7,760 +7,702 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>AR Places</title>
 <style>
-*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;
-  /* DRAG FIX 1: disable ALL touch actions globally — cards cannot be panned */
-  touch-action:none;
-  user-select:none;-webkit-user-select:none;
-}
-:root{
-  --neon:#00ff88;--neon10:rgba(0,255,136,0.10);--neon30:rgba(0,255,136,0.30);
-  --amber:#ffcc00;--font:'Courier New',monospace;
-}
-body{font-family:var(--font);background:#000;color:var(--neon);
-     overflow:hidden;width:100vw;height:100dvh;position:fixed;}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;}
+:root{--g:#00ff88;--g1:rgba(0,255,136,0.12);--g3:rgba(0,255,136,0.30);--am:#ffcc00;--f:'Courier New',monospace;}
+html,body{width:100%;height:100%;overflow:hidden;background:#000;color:var(--g);font-family:var(--f);position:fixed;touch-action:manipulation;}
 
 /* ── SCREENS ── */
-.screen{position:fixed;inset:0;display:flex;flex-direction:column;
-        align-items:center;justify-content:center;
-        z-index:300;background:#000;transition:opacity .35s;}
-.screen.off{opacity:0;pointer-events:none;}
-#ps{gap:22px;padding:36px 28px;}
-.logo{border:1px solid var(--neon);padding:7px 22px;font-size:11px;letter-spacing:6px;}
+.scr{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#000;z-index:500;gap:20px;padding:32px 24px;transition:opacity .3s;}
+.scr.hide{opacity:0;pointer-events:none;}
+.logo{border:1px solid var(--g);padding:7px 22px;font-size:11px;letter-spacing:6px;}
 .ptitle{font-size:22px;letter-spacing:3px;text-align:center;line-height:1.5;}
-.pdesc{font-size:11px;color:#555;letter-spacing:1px;text-align:center;line-height:1.9;max-width:270px;}
-.plist{width:100%;max-width:295px;display:flex;flex-direction:column;gap:9px;}
-.prow{border:1px solid #181818;padding:12px 15px;display:flex;align-items:center;gap:13px;font-size:11px;letter-spacing:1px;}
-.prow small{display:block;font-size:9px;color:#3a3a3a;margin-top:2px;letter-spacing:0;}
-.btn-go{width:100%;max-width:295px;background:var(--neon);color:#000;border:none;
-        padding:15px;font-family:var(--font);font-size:12px;letter-spacing:4px;font-weight:700;cursor:pointer;}
-.btn-dm{width:100%;max-width:295px;background:transparent;color:#444;
-        border:1px solid #222;padding:12px;font-family:var(--font);font-size:10px;letter-spacing:2px;cursor:pointer;}
-#ls{gap:16px;}
-.spinner{width:60px;height:60px;border:1px solid #111;border-top-color:var(--neon);
-         border-radius:50%;animation:spin .85s linear infinite;}
-@keyframes spin{to{transform:rotate(360deg)}}
-.lstep{font-size:10px;letter-spacing:3px;color:var(--neon);min-height:14px;}
-.lbar{width:210px;height:2px;background:#111;}
-.lfill{height:100%;background:var(--neon);width:0%;transition:width .3s;}
+.pdesc{font-size:11px;color:#555;text-align:center;line-height:1.9;letter-spacing:1px;max-width:270px;}
+.plist{width:100%;max-width:290px;display:flex;flex-direction:column;gap:8px;}
+.prow{border:1px solid #181818;padding:11px 14px;display:flex;align-items:center;gap:12px;font-size:11px;letter-spacing:1px;}
+.prow small{display:block;font-size:9px;color:#333;margin-top:2px;}
+.btn1{width:100%;max-width:290px;background:var(--g);color:#000;border:none;padding:15px;font-family:var(--f);font-size:12px;letter-spacing:4px;font-weight:700;cursor:pointer;touch-action:manipulation;}
+.btn2{width:100%;max-width:290px;background:transparent;color:#444;border:1px solid #222;padding:12px;font-family:var(--f);font-size:10px;letter-spacing:2px;cursor:pointer;touch-action:manipulation;}
+#ls{gap:14px;}
+.spin{width:56px;height:56px;border:1px solid #111;border-top-color:var(--g);border-radius:50%;animation:sp .8s linear infinite;}
+@keyframes sp{to{transform:rotate(360deg)}}
+.lmsg{font-size:10px;letter-spacing:3px;color:var(--g);}
+.lbar{width:200px;height:2px;background:#111;}
+.lpct{height:100%;background:var(--g);width:0%;transition:width .3s;}
 
 /* ── AR WORLD ── */
 #world{position:fixed;inset:0;display:none;}
-#cam{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
-#dbg{position:absolute;inset:0;background:#050f08;display:none;}
-#dbg.on{display:block;}
-.dgrid{position:absolute;inset:0;
-  background-image:linear-gradient(rgba(0,255,136,.035) 1px,transparent 1px),
-                   linear-gradient(90deg,rgba(0,255,136,.035) 1px,transparent 1px);
-  background-size:42px 42px;}
+#cam{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;}
+#fakebg{position:absolute;inset:0;background:#040c06;display:none;}
+#fakebg.on{display:block;}
+.fgrid{position:absolute;inset:0;
+  background-image:linear-gradient(rgba(0,255,136,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,255,136,.03) 1px,transparent 1px);
+  background-size:40px 40px;}
 
-/* Rings */
-.ring{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
-      border:1px solid rgba(0,255,136,.12);border-radius:50%;pointer-events:none;
-      animation:rout 3.6s ease-out infinite;}
-.ring:nth-child(2){animation-delay:1.2s;}
-.ring:nth-child(3){animation-delay:2.4s;}
-@keyframes rout{0%{width:20px;height:20px;opacity:.7}100%{width:250px;height:250px;opacity:0}}
+/* rings */
+.ring{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);border:1px solid rgba(0,255,136,.1);border-radius:50%;pointer-events:none;animation:rexp 3.5s ease-out infinite;}
+.ring:nth-child(2){animation-delay:1.16s;}.ring:nth-child(3){animation-delay:2.33s;}
+@keyframes rexp{0%{width:16px;height:16px;opacity:.6}100%{width:240px;height:240px;opacity:0}}
 
-/* ── CARDS LAYER ── */
-#cl{position:absolute;inset:0;z-index:10;overflow:hidden;
-    /* DRAG FIX 2: layer itself cannot scroll or pan */
-    touch-action:none;pointer-events:none;}
+/* ── CARD LAYER ── */
+#cl{position:absolute;inset:0;z-index:10;overflow:visible;pointer-events:none;}
 
-/* ── CARD ── */
+/* ── SINGLE CARD ──
+   position:absolute, left/top set by JS every rAF frame.
+   transform:translateX(-50%) so the card is centred on the bearing X.
+   translateY(-100%) so the anchor dot is at the bottom of the card stem, at the Y position.
+   NO touch/mouse move handlers = NO dragging.
+   opacity toggled by JS each frame — no CSS class fight.
+*/
 .card{
   position:absolute;
-  /* anchor point is bottom-centre of card (the dot) */
-  transform:translateX(-50%);
+  transform:translateX(-50%) translateY(-100%);
   pointer-events:auto;
   cursor:pointer;
-  /* DRAG FIX 3: card itself captures nothing except click — no move handlers exist */
-  touch-action:none;
-  /* visibility driven by JS opacity, not visibility property, so transition works */
-  opacity:0;
-  transition:opacity .25s ease;
+  touch-action:manipulation;/* tap only, no pan */
+  transition:none;/* no CSS transition on position — JS owns it */
   will-change:left,top,opacity;
 }
-/* card becomes visible once JS sets opacity via .vis class */
-.card.vis{opacity:1;}
-.card.edge{opacity:.22!important;pointer-events:none!important;}
-
-.ci{/* card inner */
-  background:rgba(0,0,0,.80);
-  border:1px solid var(--neon30);
-  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
-  padding:9px 13px;min-width:136px;max-width:168px;position:relative;
+.ci{
+  background:rgba(0,0,0,.82);
+  border:1px solid var(--g3);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  padding:9px 13px;min-width:134px;max-width:165px;position:relative;
 }
-.ci::before{content:'';position:absolute;top:0;left:12%;right:12%;height:1px;
-            background:linear-gradient(90deg,transparent,var(--neon),transparent);opacity:.4;}
-.ccat{display:flex;align-items:center;gap:5px;margin-bottom:4px;}
-.cico{font-size:13px;line-height:1;}
-.ccat-t{font-size:8px;letter-spacing:2px;color:#4a4a4a;}
-.cname{font-size:12px;color:#eee;letter-spacing:.4px;line-height:1.35;margin-bottom:6px;}
-.cmeta{display:flex;justify-content:space-between;align-items:center;}
-.cstar{color:var(--amber);font-size:9px;}
-.cdist{font-size:10px;color:var(--neon);letter-spacing:1px;}
-
-/* anchor stem below card */
+.ci::before{content:'';position:absolute;top:0;left:15%;right:15%;height:1px;
+  background:linear-gradient(90deg,transparent,var(--g),transparent);opacity:.35;}
+.cc{display:flex;align-items:center;gap:4px;margin-bottom:3px;}
+.cico{font-size:14px;line-height:1;}
+.ccat{font-size:8px;letter-spacing:2px;color:#444;}
+.cname{font-size:12px;color:#eee;letter-spacing:.4px;line-height:1.3;margin-bottom:6px;}
+.cbot{display:flex;justify-content:space-between;align-items:center;}
+.cst{color:var(--am);font-size:9px;}
+.cds{font-size:10px;color:var(--g);letter-spacing:1px;}
 .stem{display:flex;flex-direction:column;align-items:center;pointer-events:none;}
-.sline{width:1px;height:24px;background:linear-gradient(to bottom,rgba(0,255,136,.5),transparent);}
-.sdot{width:5px;height:5px;background:var(--neon);border-radius:50%;
-      animation:gdot 1.7s ease-in-out infinite;margin-top:-1px;}
-@keyframes gdot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.2;transform:scale(.5)}}
+.sln{width:1px;height:22px;background:linear-gradient(to bottom,rgba(0,255,136,.5),transparent);}
+.sdt{width:5px;height:5px;background:var(--g);border-radius:50%;animation:gd 1.6s ease-in-out infinite;margin-top:-1px;}
+@keyframes gd{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.2;transform:scale(.45)}}
 
 /* ── HUD ── */
 #hud{position:absolute;inset:0;z-index:20;pointer-events:none;}
-.htop{position:absolute;top:0;left:0;right:0;
-      padding:13px 15px 28px;
-      background:linear-gradient(to bottom,rgba(0,0,0,.68),transparent);
-      display:flex;align-items:center;justify-content:space-between;}
+.htop{position:absolute;top:0;left:0;right:0;padding:12px 14px 26px;
+  background:linear-gradient(to bottom,rgba(0,0,0,.65),transparent);
+  display:flex;align-items:center;justify-content:space-between;}
 .hlogo{font-size:11px;letter-spacing:5px;}
-.hgps{display:flex;align-items:center;gap:6px;font-size:9px;letter-spacing:2px;}
-.gled{width:7px;height:7px;border-radius:50%;background:var(--amber);flex-shrink:0;}
-.gled.ok{background:var(--neon);animation:blink 2s ease infinite;}
-@keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
-
+.hgps{display:flex;align-items:center;gap:5px;font-size:9px;letter-spacing:2px;}
+.gled{width:7px;height:7px;border-radius:50%;background:var(--am);flex-shrink:0;}
+.gled.ok{background:var(--g);animation:blink 2s ease infinite;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
 .hbot{position:absolute;bottom:0;left:0;right:0;
-      padding:26px 15px 15px;
-      padding-bottom:max(15px,env(safe-area-inset-bottom));
-      background:linear-gradient(to top,rgba(0,0,0,.68),transparent);
-      display:flex;align-items:flex-end;justify-content:space-between;}
-.hcoords{font-size:9px;color:#4a4a4a;letter-spacing:1px;line-height:2;}
-.hcoords b{color:#777;}
-.hrhs{font-size:9px;color:#3a3a3a;letter-spacing:1px;line-height:2;text-align:right;}
+  padding:24px 14px 14px;padding-bottom:max(14px,env(safe-area-inset-bottom));
+  background:linear-gradient(to top,rgba(0,0,0,.65),transparent);
+  display:flex;align-items:flex-end;justify-content:space-between;}
+.hco{font-size:9px;color:#444;letter-spacing:1px;line-height:2.1;}
+.hco b{color:#777;}
+.hri{font-size:9px;color:#333;letter-spacing:1px;line-height:2.1;text-align:right;}
 
-/* Compass */
-.cpass{position:absolute;top:56px;right:15px;width:52px;pointer-events:auto;cursor:pointer;}
-.cring{width:52px;height:52px;border:1px solid rgba(0,255,136,.22);border-radius:50%;
-       position:relative;display:flex;align-items:center;justify-content:center;}
-.cn{position:absolute;top:3px;font-size:8px;color:var(--neon);}
+/* compass */
+.cp{position:absolute;top:54px;right:14px;width:52px;pointer-events:auto;cursor:pointer;}
+.cr{width:52px;height:52px;border:1px solid rgba(0,255,136,.2);border-radius:50%;position:relative;display:flex;align-items:center;justify-content:center;}
+.cn{position:absolute;top:3px;font-size:8px;color:var(--g);}
 .cs{position:absolute;bottom:3px;font-size:8px;color:#2a2a2a;}
 .ce{position:absolute;right:3px;font-size:8px;color:#2a2a2a;}
 .cw{position:absolute;left:3px;font-size:8px;color:#2a2a2a;}
-.nwrap{position:absolute;inset:0;transition:transform .1s linear;}
-.ndl{position:absolute;left:50%;top:50%;width:2px;height:32px;
-     margin-left:-1px;margin-top:-16px;transform-origin:center center;}
-.ndt{position:absolute;top:0;left:0;width:100%;height:50%;
-     background:var(--neon);clip-path:polygon(50% 0%,0% 100%,100% 100%);}
-.ndb{position:absolute;bottom:0;left:0;width:100%;height:50%;
-     background:#252525;clip-path:polygon(0% 0%,100% 0%,50% 100%);}
-.cdeg{text-align:center;margin-top:3px;font-size:9px;color:#444;}
+.nw{position:absolute;inset:0;}/* needle wrapper — rotated by JS */
+.nd{position:absolute;left:50%;top:50%;width:2px;height:30px;margin-left:-1px;margin-top:-15px;transform-origin:center;}
+.ndn{position:absolute;top:0;left:0;width:100%;height:50%;background:var(--g);clip-path:polygon(50% 0%,0% 100%,100% 100%);}
+.nds{position:absolute;bottom:0;left:0;width:100%;height:50%;background:#232323;clip-path:polygon(0% 0%,100% 0%,50% 100%);}
+.cdg{text-align:center;margin-top:3px;font-size:9px;color:#444;}
 
-/* Crosshair */
-.xhair{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none;}
-.xhair::before{content:'';position:absolute;left:50%;top:-20px;width:1px;height:40px;background:rgba(0,255,136,.22);}
-.xhair::after{content:'';position:absolute;top:50%;left:-20px;height:1px;width:40px;background:rgba(0,255,136,.22);}
-.xdot{width:4px;height:4px;background:var(--neon);border-radius:50%;}
+/* crosshair */
+.xh{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none;}
+.xh::before{content:'';position:absolute;left:50%;top:-18px;width:1px;height:36px;background:rgba(0,255,136,.2);}
+.xh::after{content:'';position:absolute;top:50%;left:-18px;width:36px;height:1px;background:rgba(0,255,136,.2);}
+.xd{width:4px;height:4px;background:var(--g);border-radius:50%;}
 
-/* Demo badge */
-.dbadge{position:absolute;top:56px;left:15px;font-size:8px;letter-spacing:2px;
-        color:var(--amber);border:1px solid #1a1100;padding:3px 8px;display:none;}
-.dbadge.on{display:block;}
+/* demo badge */
+.dbg{position:absolute;top:54px;left:14px;font-size:8px;letter-spacing:2px;color:var(--am);border:1px solid #1a1000;padding:3px 7px;display:none;}
+.dbg.on{display:block;}
 
-/* No-compass notice */
-.ncnotice{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
-          font-size:10px;letter-spacing:2px;color:#333;text-align:center;
-          line-height:2;pointer-events:none;display:none;}
-.ncnotice.on{display:block;}
+/* scan button */
+.sb{display:flex;flex-direction:column;align-items:center;gap:4px;pointer-events:auto;cursor:pointer;touch-action:manipulation;}
+.sc{width:54px;height:54px;border-radius:50%;border:2px solid var(--g);background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;position:relative;}
+.sc::after{content:'';position:absolute;inset:-7px;border-radius:50%;border:1px solid rgba(0,255,136,.15);animation:sr 2.2s ease-out infinite;}
+@keyframes sr{0%{opacity:.7;transform:scale(1)}100%{opacity:0;transform:scale(1.5)}}
+.sdm{width:10px;height:10px;border:2px solid var(--g);transform:rotate(45deg);}
+.sl{font-size:8px;letter-spacing:3px;color:var(--g);}
+.sb.busy .sc,.sb.busy .sdm{border-color:var(--am);}
 
-/* Scan button */
-.sbtn{display:flex;flex-direction:column;align-items:center;gap:5px;
-      pointer-events:auto;cursor:pointer;}
-.scirc{width:56px;height:56px;border-radius:50%;border:2px solid var(--neon);
-       background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;
-       position:relative;}
-.scirc::after{content:'';position:absolute;inset:-8px;border-radius:50%;
-              border:1px solid rgba(0,255,136,.18);animation:sring 2.2s ease-out infinite;}
-@keyframes sring{0%{opacity:.8;transform:scale(1)}100%{opacity:0;transform:scale(1.5)}}
-.sdiam{width:11px;height:11px;border:2px solid var(--neon);transform:rotate(45deg);}
-.slabel{font-size:8px;letter-spacing:3px;color:var(--neon);}
-.sbtn.busy .scirc,.sbtn.busy .sdiam{border-color:var(--amber);}
+/* debug bar — shown at top while testing */
+#dbbar{position:absolute;top:0;left:0;right:0;background:rgba(0,0,0,.9);
+  font-size:9px;letter-spacing:1px;color:#ff0;z-index:100;padding:4px 8px;
+  border-bottom:1px solid #333;display:none;line-height:1.7;}
+#dbbar.on{display:block;}
 
-/* ── DETAIL PANEL ── */
+/* ── DETAIL ── */
 #det{position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.97);
-     transform:translateY(100%);transition:transform .3s cubic-bezier(.4,0,.2,1);
-     display:flex;flex-direction:column;overflow-y:auto;-webkit-overflow-scrolling:touch;
-     touch-action:pan-y;/* allow scroll inside detail */}
+  transform:translateY(100%);transition:transform .3s cubic-bezier(.4,0,.2,1);
+  display:flex;flex-direction:column;overflow-y:auto;-webkit-overflow-scrolling:touch;touch-action:pan-y;}
 #det.open{transform:translateY(0);}
-.dh{position:sticky;top:0;background:rgba(0,0,0,.97);z-index:1;
-    padding:15px 19px 11px;border-bottom:1px solid #111;
-    display:flex;align-items:center;justify-content:space-between;}
-.dchip{font-size:9px;letter-spacing:2px;color:#4a4a4a;background:#0a0a0a;
-       border:1px solid #181818;padding:4px 10px;display:flex;align-items:center;gap:5px;}
-.dclose{width:33px;height:33px;border:1px solid #222;background:transparent;
-        color:var(--neon);font-family:var(--font);font-size:15px;cursor:pointer;
-        touch-action:manipulation;}
-.db{padding:20px 19px;flex:1;}
-.dico{font-size:42px;display:block;margin-bottom:9px;}
-.dname{font-size:20px;color:#fff;letter-spacing:2px;line-height:1.3;margin-bottom:11px;}
-.dmeta{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:18px;}
-.dstar{color:var(--amber);font-size:14px;}
-.drev{font-size:10px;color:#4a4a4a;letter-spacing:1px;}
-.dbadge2{border:1px solid var(--neon);color:var(--neon);font-size:10px;
-         letter-spacing:2px;padding:3px 9px;background:var(--neon10);}
-.sl{font-size:8px;letter-spacing:3px;color:#2a2a2a;border-bottom:1px solid #0e0e0e;
-    padding-bottom:5px;margin-bottom:9px;margin-top:18px;}
-.dabout{font-size:12px;color:#666;line-height:1.9;}
-.dhours{display:flex;flex-direction:column;gap:5px;}
-.hr{display:flex;justify-content:space-between;font-size:11px;}
-.hr span:first-child{color:#4a4a4a;}
-.hr span:last-child{color:#888;}
-.dtags{display:flex;flex-wrap:wrap;gap:6px;}
-.tag{font-size:9px;letter-spacing:1px;color:var(--neon);
-     border:1px solid rgba(0,255,136,.18);padding:4px 9px;}
-.dacts{display:flex;gap:8px;padding:0 19px max(18px,env(safe-area-inset-bottom));margin-top:6px;}
-.dact{flex:1;padding:13px 5px;background:transparent;
-      border:1px solid rgba(0,255,136,.22);color:var(--neon);
-      font-family:var(--font);font-size:9px;letter-spacing:2px;
-      cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:5px;
-      touch-action:manipulation;}
-.dact:active{background:var(--neon10);}
-.dact-ico{font-size:17px;}
+.dh{position:sticky;top:0;background:rgba(0,0,0,.97);z-index:1;padding:14px 18px 10px;border-bottom:1px solid #111;display:flex;align-items:center;justify-content:space-between;}
+.dchip{font-size:9px;letter-spacing:2px;color:#444;background:#0a0a0a;border:1px solid #181818;padding:4px 9px;display:flex;align-items:center;gap:5px;}
+.dcls{width:32px;height:32px;border:1px solid #222;background:transparent;color:var(--g);font-family:var(--f);font-size:15px;cursor:pointer;touch-action:manipulation;}
+.db{padding:20px 18px;flex:1;}
+.dico{font-size:40px;display:block;margin-bottom:8px;}
+.dnam{font-size:20px;color:#fff;letter-spacing:2px;line-height:1.3;margin-bottom:10px;}
+.dmeta{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:16px;}
+.dst{color:var(--am);font-size:14px;}
+.drv{font-size:10px;color:#444;letter-spacing:1px;}
+.dbd{border:1px solid var(--g);color:var(--g);font-size:10px;letter-spacing:2px;padding:3px 9px;background:rgba(0,255,136,.07);}
+.sl{font-size:8px;letter-spacing:3px;color:#2a2a2a;border-bottom:1px solid #0e0e0e;padding-bottom:5px;margin-bottom:8px;margin-top:16px;}
+.dabt{font-size:12px;color:#666;line-height:1.9;}
+.dhr{display:flex;flex-direction:column;gap:4px;}
+.dhrr{display:flex;justify-content:space-between;font-size:11px;}
+.dhrr span:first-child{color:#444;}.dhrr span:last-child{color:#888;}
+.dtgs{display:flex;flex-wrap:wrap;gap:5px;}
+.tag{font-size:9px;letter-spacing:1px;color:var(--g);border:1px solid rgba(0,255,136,.17);padding:4px 9px;}
+.dac{display:flex;gap:7px;padding:0 18px max(16px,env(safe-area-inset-bottom));margin-top:5px;}
+.da{flex:1;padding:12px 5px;background:transparent;border:1px solid rgba(0,255,136,.2);color:var(--g);font-family:var(--f);font-size:9px;letter-spacing:2px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:5px;touch-action:manipulation;}
+.da:active{background:rgba(0,255,136,.08);}
+.daico{font-size:16px;}
 
-/* Toast */
-.toast{position:fixed;bottom:108px;left:50%;transform:translateX(-50%);
-       background:#0a0a0a;border:1px solid var(--neon);color:var(--neon);
-       font-family:var(--font);font-size:10px;letter-spacing:2px;
-       padding:9px 18px;z-index:400;opacity:0;pointer-events:none;
-       transition:opacity .22s;white-space:nowrap;}
+/* toast */
+.toast{position:fixed;bottom:104px;left:50%;transform:translateX(-50%);
+  background:#0a0a0a;border:1px solid var(--g);color:var(--g);
+  font-family:var(--f);font-size:10px;letter-spacing:2px;padding:8px 16px;
+  z-index:600;opacity:0;pointer-events:none;transition:opacity .2s;white-space:nowrap;}
 .toast.on{opacity:1;}
 </style>
 </head>
 <body>
 
-<!-- PERMISSION SCREEN -->
-<div class="screen" id="ps">
+<!-- PERMISSION -->
+<div class="scr" id="ps">
   <div class="logo">AR PLACES</div>
   <div class="ptitle">AUGMENTED<br>REALITY</div>
-  <div class="pdesc">Point your camera at the world.<br>See real nearby places overlaid live.</div>
+  <div class="pdesc">Point your camera at the world and see nearby places overlaid live.</div>
   <div class="plist">
     <div class="prow"><span style="font-size:19px">📷</span><div>CAMERA<small>Rear camera for live AR view</small></div></div>
     <div class="prow"><span style="font-size:19px">📍</span><div>LOCATION<small>GPS to find nearby places</small></div></div>
-    <div class="prow"><span style="font-size:19px">🧭</span><div>COMPASS<small>Orientation so cards face right direction</small></div></div>
+    <div class="prow"><span style="font-size:19px">🧭</span><div>COMPASS<small>Tap compass widget after launch (iOS)</small></div></div>
   </div>
-  <button class="btn-go" onclick="startAR()">ENABLE &amp; START</button>
-  <button class="btn-dm" onclick="startDemo()">DEMO MODE — no permissions</button>
+  <button class="btn1" onclick="startAR()">ENABLE &amp; START</button>
+  <button class="btn2" onclick="startDemo()">DEMO MODE — no permissions</button>
 </div>
 
-<!-- LOADING SCREEN -->
-<div class="screen off" id="ls">
-  <div class="spinner"></div>
-  <div class="lstep" id="lstep">STARTING...</div>
-  <div class="lbar"><div class="lfill" id="lfill"></div></div>
+<!-- LOADING -->
+<div class="scr hide" id="ls">
+  <div class="spin"></div>
+  <div class="lmsg" id="lmsg">STARTING...</div>
+  <div class="lbar"><div class="lpct" id="lpct"></div></div>
 </div>
 
 <!-- AR WORLD -->
 <div id="world">
   <video id="cam" autoplay playsinline muted></video>
-  <div id="dbg"><div class="dgrid"></div></div>
+  <div id="fakebg"><div class="fgrid"></div></div>
   <div class="ring"></div><div class="ring"></div><div class="ring"></div>
-  <div id="cl"></div><!-- cards layer -->
+  <div id="cl"></div>
+
+  <!-- debug bar — tap logo 3x to toggle -->
+  <div id="dbbar"></div>
 
   <div id="hud">
     <div class="htop">
-      <div class="hlogo">◈ AR PLACES</div>
+      <div class="hlogo" id="hlogo" onclick="dbgTap()">◈ AR PLACES</div>
       <div class="hgps"><div class="gled" id="gled"></div><span id="gtxt">SEARCHING</span></div>
     </div>
-
-    <!-- Compass — tap on iOS to grant permission -->
-    <div class="cpass" id="cpass" onclick="reqCompass()">
-      <div class="cring">
-        <span class="cn">N</span><span class="cs">S</span>
-        <span class="ce">E</span><span class="cw">W</span>
-        <div class="nwrap" id="nwrap">
-          <div class="ndl"><div class="ndt"></div><div class="ndb"></div></div>
-        </div>
+    <div class="cp" id="cpw" onclick="reqCmp()">
+      <div class="cr">
+        <span class="cn">N</span><span class="cs">S</span><span class="ce">E</span><span class="cw">W</span>
+        <div class="nw" id="nw"><div class="nd"><div class="ndn"></div><div class="nds"></div></div></div>
       </div>
-      <div class="cdeg" id="cdeg">tap↑</div>
+      <div class="cdg" id="cdg">---°</div>
     </div>
-
-    <div class="dbadge" id="dbadge">DEMO</div>
-    <div class="ncnotice" id="ncnotice">COMPASS<br>NOT AVAILABLE<br>CARDS FIXED</div>
-    <div class="xhair"><div class="xdot"></div></div>
-
+    <div class="dbg" id="dbadge">DEMO</div>
+    <div class="xh"><div class="xd"></div></div>
     <div class="hbot">
-      <div class="hcoords">
-        <div>LAT <b id="hlat">---.------</b></div>
-        <div>LNG <b id="hlng">---.------</b></div>
+      <div class="hco">
+        <div>LAT <b id="hlat">---</b></div>
+        <div>LNG <b id="hlng">---</b></div>
         <div>ACC <b id="hacc">---</b>m</div>
       </div>
-      <div class="sbtn" id="sbtn" onclick="doScan()">
-        <div class="scirc"><div class="sdiam"></div></div>
-        <div class="slabel">SCAN</div>
+      <div class="sb" id="sbt" onclick="doScan()">
+        <div class="sc"><div class="sdm"></div></div>
+        <div class="sl">SCAN</div>
       </div>
-      <div class="hrhs">
+      <div class="hri">
         <div id="hhdg">HDG ---°</div>
         <div id="hcnt">0 PLACES</div>
+        <div id="hfov">FOV 360°</div>
       </div>
     </div>
   </div>
 </div>
 
-<!-- DETAIL PANEL -->
+<!-- DETAIL -->
 <div id="det">
   <div class="dh">
     <div class="dchip" id="dchip"></div>
-    <button class="dclose" onclick="closeDet()">✕</button>
+    <button class="dcls" onclick="closeDet()">✕</button>
   </div>
   <div class="db">
     <span class="dico" id="dico"></span>
-    <div class="dname" id="dname"></div>
+    <div class="dnam" id="dnam"></div>
     <div class="dmeta">
-      <span class="dstar" id="dstar"></span>
-      <span class="drev" id="drev"></span>
-      <span class="dbadge2" id="ddist"></span>
+      <span class="dst" id="dst"></span>
+      <span class="drv" id="drv"></span>
+      <span class="dbd" id="dbd"></span>
     </div>
-    <div class="sl">ABOUT</div><div class="dabout" id="dabout"></div>
-    <div class="sl">HOURS</div><div class="dhours" id="dhours"></div>
-    <div class="sl">TAGS</div><div class="dtags" id="dtags"></div>
+    <div class="sl">ABOUT</div><div class="dabt" id="dabt"></div>
+    <div class="sl">HOURS</div><div class="dhr" id="dhr"></div>
+    <div class="sl">TAGS</div><div class="dtgs" id="dtgs"></div>
   </div>
-  <div class="dacts">
-    <button class="dact" onclick="toast('OPENING MAPS')"><span class="dact-ico">🗺️</span>DIRECTIONS</button>
-    <button class="dact" onclick="toast('LINK COPIED')"><span class="dact-ico">↗</span>SHARE</button>
-    <button class="dact" onclick="toast('SAVED ◈')"><span class="dact-ico">◈</span>SAVE</button>
+  <div class="dac">
+    <button class="da" onclick="showToast('OPENING MAPS')"><span class="daico">🗺️</span>DIRECTIONS</button>
+    <button class="da" onclick="showToast('COPIED')"><span class="daico">↗</span>SHARE</button>
+    <button class="da" onclick="showToast('SAVED ◈')"><span class="daico">◈</span>SAVE</button>
   </div>
 </div>
 
 <div class="toast" id="toastEl"></div>
 
 <script>
-/* ─────────────────────────────────────────────
-   PLACE DATA  (real Dubai GPS coords)
-
-   PRODUCTION: replace with:
-   async function loadPlaces(lat,lng){
-     // Google Places Nearby Search
-     const r=await fetch(`https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=1500&key=KEY`);
-     const d=await r.json();
-     return d.results.map(p=>({
-       id:p.place_id, name:p.name,
-       lat:p.geometry.location.lat, lng:p.geometry.location.lng,
-       category:p.types[0], icon:'📍',
-       rating:p.rating, reviews:p.user_ratings_total,
-       about:'', hours:[], tags:[]
-     }));
-   }
-───────────────────────────────────────────── */
-const PLACES=[
-  {id:1,name:'Burj Khalifa',lat:25.197197,lng:55.274376,
-   cat:'LANDMARK',ico:'🏙️',rating:4.8,rev:142803,
-   about:'World\'s tallest building at 828 m. Observation decks on floors 124 and 148 give panoramic views to the Arabian Gulf.',
-   hours:[{d:'DAILY',t:'08:30–23:00'},{d:'TICKET DESK',t:'Opens 08:00'}],
-   tags:['OBSERVATION','ICONIC','PHOTOGRAPHY']},
-  {id:2,name:'The Dubai Mall',lat:25.198765,lng:55.279503,
-   cat:'SHOPPING',ico:'🛍️',rating:4.6,rev:231450,
-   about:'World\'s largest shopping centre — 1,200 stores, Dubai Aquarium, Olympic ice rink and the famous Dubai Fountain right outside.',
-   hours:[{d:'SUN–WED',t:'10:00–00:00'},{d:'THU–SAT',t:'10:00–01:00'}],
-   tags:['SHOPPING','AQUARIUM','FOOD','FOUNTAIN']},
-  {id:3,name:'Emirates Towers',lat:25.217345,lng:55.282123,
-   cat:'HOTEL/OFFICE',ico:'🏢',rating:4.5,rev:22450,
-   about:'Twin towers on Sheikh Zayed Road. Office tower at 355 m, hotel tower with acclaimed dining and The Agency wine bar.',
-   hours:[{d:'LOBBY',t:'24 hours'},{d:'RESTAURANT',t:'12:00–01:00'}],
-   tags:['BUSINESS','LUXURY','FINE DINING']},
-  {id:4,name:'Zuma Dubai',lat:25.212899,lng:55.281100,
-   cat:'RESTAURANT',ico:'🍱',rating:4.7,rev:18920,
-   about:'World-class izakaya in DIFC Gate Village. Celebrated robata grill, sushi counter and vibrant cocktail bar. Book weeks ahead.',
-   hours:[{d:'MON–THU',t:'12:00–00:30'},{d:'FRI–SAT',t:'12:00–01:30'}],
-   tags:['JAPANESE','ROBATA','COCKTAILS','DIFC']},
-  {id:5,name:'% Arabica DIFC',lat:25.211500,lng:55.280200,
-   cat:'CAFÉ',ico:'☕',rating:4.4,rev:4320,
-   about:'Minimalist Japanese specialty coffee in Gate Village. Precise pour-overs and a signature latte. Serene escape between towers.',
-   hours:[{d:'DAILY',t:'07:00–22:00'}],
-   tags:['COFFEE','JAPANESE','WIFI']},
-  {id:6,name:'Waitrose DIFC',lat:25.213100,lng:55.282600,
-   cat:'SUPERMARKET',ico:'🛒',rating:4.3,rev:2180,
-   about:'Premium British supermarket in Gate Precinct. Great imported goods, sushi counter, deli and bakery.',
-   hours:[{d:'DAILY',t:'07:00–23:00'}],
-   tags:['GROCERY','IMPORTS','FRESH','DELI']},
-  {id:7,name:'Dubai Opera',lat:25.194987,lng:55.272345,
-   cat:'CULTURE',ico:'🎭',rating:4.8,rev:31200,
-   about:'Dhow-shaped performing arts venue in Downtown Dubai hosting world-class opera, ballet and Broadway shows.',
-   hours:[{d:'BOX OFFICE',t:'10:00–21:00'},{d:'SHOWS',t:'Until 23:30'}],
-   tags:['OPERA','BALLET','CONCERTS','ARCHITECTURE']},
-  {id:8,name:'Armani Hotel',lat:25.196500,lng:55.273800,
-   cat:'LUXURY HOTEL',ico:'🏨',rating:4.7,rev:8740,
-   about:'Giorgio Armani\'s first hotel inside Burj Khalifa. Every detail personally designed — rooms, restaurants and spa.',
-   hours:[{d:'CHECK-IN',t:'24 hours'},{d:'DINING',t:'07:00–01:00'}],
-   tags:['LUXURY','ARMANI','BURJ KHALIFA','SPA']},
+/* ═══════════════════════════════════════════════════
+   PLACES — real Dubai GPS coords
+   PRODUCTION: replace array with Google Places / Overpass API fetch
+═══════════════════════════════════════════════════ */
+const PLACES = [
+  {id:1,name:'Burj Khalifa',       lat:25.197197,lng:55.274376,cat:'LANDMARK',   ico:'🏙️',rating:4.8,rev:142803,
+   about:'World\'s tallest building at 828m. Observation decks on floors 124 and 148.',
+   hours:[{d:'DAILY',t:'08:30–23:00'}],tags:['LANDMARK','ICONIC','VIEWS']},
+  {id:2,name:'Dubai Mall',         lat:25.198765,lng:55.279503,cat:'SHOPPING',   ico:'🛍️',rating:4.6,rev:231450,
+   about:'1,200 stores, Dubai Aquarium, ice rink, VR Park and the Dubai Fountain.',
+   hours:[{d:'SUN–WED',t:'10:00–00:00'},{d:'THU–SAT',t:'10:00–01:00'}],tags:['SHOPPING','FOOD','AQUARIUM']},
+  {id:3,name:'Emirates Towers',    lat:25.217345,lng:55.282123,cat:'HOTEL',      ico:'🏢',rating:4.5,rev:22450,
+   about:'Twin towers on Sheikh Zayed Road. Fine dining and The Agency wine bar.',
+   hours:[{d:'LOBBY',t:'24 hours'}],tags:['HOTEL','BUSINESS','DINING']},
+  {id:4,name:'Zuma Dubai',         lat:25.212899,lng:55.281100,cat:'RESTAURANT', ico:'🍱',rating:4.7,rev:18920,
+   about:'World-class izakaya in DIFC. Robata grill, sushi counter, cocktail bar.',
+   hours:[{d:'MON–THU',t:'12:00–00:30'},{d:'FRI–SAT',t:'12:00–01:30'}],tags:['JAPANESE','DIFC','COCKTAILS']},
+  {id:5,name:'% Arabica DIFC',     lat:25.211500,lng:55.280200,cat:'CAFÉ',       ico:'☕',rating:4.4,rev:4320,
+   about:'Japanese specialty coffee in Gate Village. Precise pour-overs and signature latte.',
+   hours:[{d:'DAILY',t:'07:00–22:00'}],tags:['COFFEE','WIFI','JAPANESE']},
+  {id:6,name:'Waitrose DIFC',      lat:25.213100,lng:55.282600,cat:'SUPERMARKET',ico:'🛒',rating:4.3,rev:2180,
+   about:'Premium British supermarket. Imported goods, sushi counter, deli and bakery.',
+   hours:[{d:'DAILY',t:'07:00–23:00'}],tags:['GROCERY','FRESH','DELI']},
+  {id:7,name:'Dubai Opera',        lat:25.194987,lng:55.272345,cat:'CULTURE',    ico:'🎭',rating:4.8,rev:31200,
+   about:'Dhow-shaped arts venue in Downtown. Opera, ballet, Broadway shows.',
+   hours:[{d:'BOX OFFICE',t:'10:00–21:00'}],tags:['OPERA','BALLET','CONCERTS']},
+  {id:8,name:'Armani Hotel',       lat:25.196500,lng:55.273800,cat:'HOTEL',      ico:'🏨',rating:4.7,rev:8740,
+   about:'Armani\'s first hotel inside Burj Khalifa. Designed in full by Giorgio Armani.',
+   hours:[{d:'CHECK-IN',t:'24 hours'},{d:'DINING',t:'07:00–01:00'}],tags:['LUXURY','SPA','ARMANI']},
 ];
 
-/* ─────────────────────────────────────────────
+/* ═══════════════════════════════════════════════════
    STATE
-───────────────────────────────────────────── */
-let userLat=25.2120, userLng=55.2817; // default: DIFC Dubai
-let heading=0;          // compass bearing, degrees, 0=North
-let compassLive=false;  // true once orientation events are firing
-let gpsLive=false;
-let isDemo=false;
-let scanning=false;
-let cardEls={};         // placeId → DOM element
-let rafId=null;
+═══════════════════════════════════════════════════ */
+let userLat  = 25.2120;   // default centre: DIFC Dubai
+let userLng  = 55.2817;
+let heading  = 0;         // compass bearing, 0=North, clockwise
+let compassActive = false;// true once orientation events fire
+let isDemo   = false;
+let scanning = false;
+let cardEls  = {};        // id → DOM element
 
-/* ─────────────────────────────────────────────
+/*
+  FOV STRATEGY:
+  - When compass is active: use 120° FOV (generous, ±60° from centre)
+  - When NO compass: show ALL cards spread across full screen width
+  This ensures cards are always visible regardless of compass availability.
+*/
+let FOV = 360; // starts at 360 (show all), narrows once compass fires
+
+/* ═══════════════════════════════════════════════════
    SCREENS
-───────────────────────────────────────────── */
-function show(id){
-  document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('off',s.id!==id));
+═══════════════════════════════════════════════════ */
+function showScr(id) {
+  document.querySelectorAll('.scr').forEach(s => s.classList.toggle('hide', s.id !== id));
 }
-async function step(pct,msg){
-  document.getElementById('lstep').textContent=msg;
-  document.getElementById('lfill').style.width=pct+'%';
-  await sleep(360+Math.random()*180);
+async function lstep(pct, msg) {
+  document.getElementById('lmsg').textContent = msg;
+  document.getElementById('lpct').style.width = pct + '%';
+  await sleep(300 + Math.random() * 150);
 }
 
-/* ─────────────────────────────────────────────
-   INIT
-───────────────────────────────────────────── */
-async function startAR(){
-  show('ls');
-  await step(10,'REQUESTING CAMERA...');
-  try{
-    const s=await navigator.mediaDevices.getUserMedia(
-      {video:{facingMode:{ideal:'environment'},width:{ideal:1920}},audio:false});
-    const v=document.getElementById('cam');
-    v.srcObject=s; await v.play();
-  }catch(e){ isDemo=true; }
-  await step(35,'ACCESSING LOCATION...');
-  await step(60,'CALIBRATING SENSORS...');
-  await step(80,'LOADING PLACES...');
-  await step(100,'READY');
-  await sleep(280);
+/* ═══════════════════════════════════════════════════
+   START FLOWS
+═══════════════════════════════════════════════════ */
+async function startAR() {
+  showScr('ls');
+  await lstep(10, 'REQUESTING CAMERA...');
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 } },
+      audio: false
+    });
+    const v = document.getElementById('cam');
+    v.srcObject = stream;
+    await v.play();
+  } catch(e) {
+    isDemo = true; // camera denied → use fake bg
+  }
+  await lstep(40, 'GETTING LOCATION...');
+  await lstep(70, 'CALIBRATING...');
+  await lstep(100, 'READY');
+  await sleep(250);
   launch();
 }
 
-function startDemo(){
-  isDemo=true; show('ls');
-  (async()=>{
-    for(const[p,m] of [[15,'DEMO MODE...'],[50,'LOADING PLACES...'],[100,'READY']]){
-      await step(p,m);
+function startDemo() {
+  isDemo = true;
+  showScr('ls');
+  (async () => {
+    for (const [p,m] of [[20,'DEMO MODE...'],[60,'LOADING...'],[100,'READY']]) {
+      await lstep(p, m);
     }
-    await sleep(260); launch();
+    await sleep(220);
+    launch();
   })();
 }
 
-function launch(){
-  show(null);
-  document.getElementById('world').style.display='block';
+function launch() {
+  showScr(null);
+  document.getElementById('world').style.display = 'block';
 
-  if(isDemo){
-    document.getElementById('dbg').classList.add('on');
+  if (isDemo) {
+    document.getElementById('fakebg').classList.add('on');
     document.getElementById('dbadge').classList.add('on');
-    document.getElementById('cam').style.display='none';
-    // Fake GPS lock after 1.5 s
-    setTimeout(()=>{ gpsLive=true; setGPS(userLat,userLng,10); },1500);
-    // Simulate compass rotating so cards visibly move during demo
-    let h=120; compassLive=true;
-    setInterval(()=>{ h=(h+0.4)%360; setHeading(h); },50);
+    document.getElementById('cam').style.display = 'none';
+    // Simulate GPS
+    setTimeout(() => setGPSUI(userLat, userLng, 8), 1200);
+    // Simulate compass so demo shows card movement
+    let h = 0; compassActive = true;
+    const demoInterval = setInterval(() => {
+      h = (h + 0.5) % 360;
+      setHeading(h);
+    }, 50);
+    window._demoInterval = demoInterval;
   } else {
     startGPS();
     startOrientation();
   }
 
-  // rAF loop — repositions cards every frame
-  function loop(){ positionCards(); rafId=requestAnimationFrame(loop); }
-  loop();
-
-  // Spawn card DOM elements (invisible until positionCards makes them visible)
   spawnCards();
+  requestAnimationFrame(loop);
 }
 
-/* ─────────────────────────────────────────────
+/* ═══════════════════════════════════════════════════
    GPS
-   PRODUCTION: swap watchPosition for fetchNearbyPlaces()
-───────────────────────────────────────────── */
-function startGPS(){
-  if(!navigator.geolocation){ noGPS(); return; }
-  navigator.geolocation.watchPosition(
-    pos=>{
-      userLat=pos.coords.latitude;
-      userLng=pos.coords.longitude;
-      gpsLive=true;
-      setGPS(userLat,userLng,pos.coords.accuracy);
-    },
-    ()=>noGPS(),
-    {enableHighAccuracy:true,maximumAge:3000,timeout:15000}
-  );
+═══════════════════════════════════════════════════ */
+function startGPS() {
+  if (!navigator.geolocation) { noGPS(); return; }
+  navigator.geolocation.watchPosition(pos => {
+    userLat = pos.coords.latitude;
+    userLng = pos.coords.longitude;
+    setGPSUI(userLat, userLng, pos.coords.accuracy);
+    /* PRODUCTION: on first GPS fix, fetch nearby places:
+       loadNearbyPlaces(userLat, userLng);
+    */
+  }, noGPS, { enableHighAccuracy: true, maximumAge: 3000, timeout: 15000 });
 }
-function setGPS(lat,lng,acc){
-  document.getElementById('hlat').textContent=lat.toFixed(6);
-  document.getElementById('hlng').textContent=lng.toFixed(6);
-  document.getElementById('hacc').textContent=acc?Math.round(acc):'?';
+function setGPSUI(lat, lng, acc) {
+  document.getElementById('hlat').textContent = lat.toFixed(5);
+  document.getElementById('hlng').textContent = lng.toFixed(5);
+  document.getElementById('hacc').textContent = acc ? Math.round(acc) : '?';
   document.getElementById('gled').classList.add('ok');
-  document.getElementById('gtxt').textContent='GPS LOCK';
+  document.getElementById('gtxt').textContent = 'GPS LOCK';
 }
-function noGPS(){
-  document.getElementById('gtxt').textContent='NO GPS';
-}
+function noGPS() { document.getElementById('gtxt').textContent = 'NO GPS'; }
 
-/* ─────────────────────────────────────────────
+/* ═══════════════════════════════════════════════════
    COMPASS / ORIENTATION
 
-   KEY LOGIC:
-   - iOS: webkitCompassHeading is TRUE compass bearing (0=North, clockwise)
-   - Android: alpha is device rotation FROM NORTH, counter-clockwise
-     so heading = (360 - alpha) % 360
-   - We store heading = direction the TOP of the phone points (compass bearing)
-   - bearingToX() computes how far a place is from that direction
-───────────────────────────────────────────── */
-function startOrientation(){
-  if(typeof DeviceOrientationEvent==='undefined'){
-    document.getElementById('ncnotice').classList.add('on');
-    compassLive=false; return;
-  }
-  const handler=e=>{
-    let h=null;
-    if(e.webkitCompassHeading!=null && e.webkitCompassHeading>0){
-      h=e.webkitCompassHeading; // iOS — already true north, clockwise
-    } else if(e.alpha!=null){
-      h=(360-e.alpha+360)%360;  // Android
+   iOS:  webkitCompassHeading is true compass bearing 0-360, clockwise from North ✓
+   Android: alpha = device rotation CCW from arbitrary origin
+             absolute mode: alpha is CCW from magnetic north
+             heading = (360 - alpha) % 360
+
+   When compass fires, FOV shrinks from 360° to 120° so cards are
+   position-aware. Before that, all cards show spread across full screen.
+═══════════════════════════════════════════════════ */
+function startOrientation() {
+  if (typeof DeviceOrientationEvent === 'undefined') return;
+  const handle = e => {
+    let h = null;
+    if (typeof e.webkitCompassHeading === 'number' && e.webkitCompassHeading >= 0) {
+      h = e.webkitCompassHeading; // iOS
+    } else if (e.alpha !== null && e.alpha !== undefined) {
+      h = (360 - e.alpha + 360) % 360; // Android
     }
-    if(h===null) return;
-    compassLive=true;
+    if (h === null) return;
+    if (!compassActive) {
+      compassActive = true;
+      FOV = 120; // switch from full-screen to bearing-aware FOV
+      document.getElementById('hfov').textContent = 'FOV 120°';
+    }
     setHeading(h);
   };
-  // iOS 13+ requires explicit permission triggered by user gesture
-  if(typeof DeviceOrientationEvent.requestPermission==='function'){
-    window._ohHandler=handler; // saved for reqCompass()
+  if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+    window._ohh = handle; // iOS 13+ — grant via tap on compass widget
   } else {
-    window.addEventListener('deviceorientationabsolute',handler,true);
-    window.addEventListener('deviceorientation',handler,true);
+    window.addEventListener('deviceorientationabsolute', handle, true);
+    window.addEventListener('deviceorientation', handle, true);
   }
 }
 
-function reqCompass(){
-  if(typeof DeviceOrientationEvent!=='undefined' &&
-     typeof DeviceOrientationEvent.requestPermission==='function'){
-    DeviceOrientationEvent.requestPermission().then(s=>{
-      if(s==='granted' && window._ohHandler){
-        window.addEventListener('deviceorientation',window._ohHandler,true);
-        toast('COMPASS ON');
+function reqCmp() {
+  if (typeof DeviceOrientationEvent !== 'undefined' &&
+      typeof DeviceOrientationEvent.requestPermission === 'function') {
+    DeviceOrientationEvent.requestPermission().then(s => {
+      if (s === 'granted' && window._ohh) {
+        window.addEventListener('deviceorientation', window._ohh, true);
+        showToast('COMPASS ON');
       }
     }).catch(console.error);
   }
 }
 
-function setHeading(h){
-  heading=h;
-  // Needle rotates opposite to heading so it always points at North in world
-  document.getElementById('nwrap').style.transform=`rotate(${-h}deg)`;
-  document.getElementById('cdeg').textContent=Math.round(h)+'°';
-  document.getElementById('hhdg').textContent='HDG '+Math.round(h)+'°';
+function setHeading(h) {
+  heading = h;
+  document.getElementById('nw').style.transform = `rotate(${-h}deg)`;
+  document.getElementById('cdg').textContent = Math.round(h) + '°';
+  document.getElementById('hhdg').textContent = 'HDG ' + Math.round(h) + '°';
 }
 
-/* ─────────────────────────────────────────────
-   BEARING & DISTANCE MATH
-───────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════
+   MATH
 
-// Bearing from user → place, 0–360 degrees (0=North, clockwise)
-function bearing(lat1,lng1,lat2,lng2){
-  const R=Math.PI/180;
-  const dL=(lng2-lng1)*R, la1=lat1*R, la2=lat2*R;
-  const y=Math.sin(dL)*Math.cos(la2);
-  const x=Math.cos(la1)*Math.sin(la2)-Math.sin(la1)*Math.cos(la2)*Math.cos(dL);
-  return(Math.atan2(y,x)*180/Math.PI+360)%360;
+   bearing(lat1,lng1 → lat2,lng2) → degrees 0-360 (0=North, CW)
+   This is the ABSOLUTE compass direction from user to place.
+   bearingToX() converts that to a screen pixel X.
+
+   PRODUCTION: these functions work with real coords from any source.
+   No changes needed when swapping hardcoded PLACES for API results.
+═══════════════════════════════════════════════════ */
+function calcBearing(la1, lo1, la2, lo2) {
+  const R = Math.PI / 180;
+  const dL = (lo2 - lo1) * R;
+  const a = la1*R, b = la2*R;
+  const y = Math.sin(dL) * Math.cos(b);
+  const x = Math.cos(a)*Math.sin(b) - Math.sin(a)*Math.cos(b)*Math.cos(dL);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
 }
-
-// Haversine distance in metres
-function dist(lat1,lng1,lat2,lng2){
-  const R=6371000,r=Math.PI/180;
-  const dLa=(lat2-lat1)*r, dLo=(lng2-lng1)*r;
-  const a=Math.sin(dLa/2)**2+Math.cos(lat1*r)*Math.cos(lat2*r)*Math.sin(dLo/2)**2;
-  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+function calcDist(la1, lo1, la2, lo2) {
+  const R = 6371000, r = Math.PI/180;
+  const dLa = (la2-la1)*r, dLo = (lo2-lo1)*r;
+  const a = Math.sin(dLa/2)**2 + Math.cos(la1*r)*Math.cos(la2*r)*Math.sin(dLo/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
-
-function fmtD(m){ return m<1000?Math.round(m)+'m':(m/1000).toFixed(1)+'km'; }
+function fmtD(m) { return m < 1000 ? Math.round(m)+'m' : (m/1000).toFixed(1)+'km'; }
 
 /*
-  bearingToX — maps a place bearing to a screen X pixel.
-
-  HOW IT WORKS:
-  diff = angular difference between place bearing and where the phone points.
-  diff=0   → place is dead ahead → centre of screen.
-  diff=-25 → place is 25° to our left → left side of screen.
-  diff>±30 → place is outside 60° FOV → hidden (returns null).
-
-  PRODUCTION HOOK: with real device orientation + real GPS coords from an API,
-  this single function is what makes the AR work anywhere in the world.
-  No changes needed — just feed it real data.
+  bearingToX:
+  - FOV=360: ignore heading entirely, spread cards evenly L→R by absolute bearing.
+  - FOV=120: only show cards within ±60° of current heading.
+    diff=0 → dead ahead → screen centre.
+    diff=+60 → hard right → right edge of screen.
+    diff=-60 → hard left → left edge.
+    diff outside ±60 → return null (hidden).
 */
-const FOV=60; // horizontal degrees visible
-function bearingToX(placeBearing,deviceHeading,vw){
-  // Normalise difference to -180…+180
-  let diff=((placeBearing-deviceHeading+540)%360)-180;
-  const half=FOV/2;
-  if(Math.abs(diff)>half) return null; // outside current view
-  return vw*((diff+half)/FOV);         // 0=left edge, vw=right edge
+function bearingToX(pb, dh, vw) {
+  if (FOV >= 360) {
+    // No compass: spread all places across screen by their absolute bearing
+    // 0° (N) maps to left, 360° back to left — full circle across screen width
+    return vw * (pb / 360);
+  }
+  // Compass active: diff = how far place is from where we're pointing
+  let diff = ((pb - dh + 540) % 360) - 180; // normalise to -180…+180
+  const half = FOV / 2;
+  if (Math.abs(diff) > half) return null;    // outside view
+  return vw * ((diff + half) / FOV);
 }
 
 /*
-  distToY — vertical position based on distance.
-  Closer = lower on screen (nearer your feet), far = higher (towards horizon).
-  50 m → 70% down,  2000 m → 18% down.
+  distToY: distance → vertical position.
+  Very close (50m) → 72% down (near ground).
+  Far (2000m)      → 20% down (near horizon).
 */
-function distToY(m,vh){
-  const lo=50,hi=2000,yLo=0.70,yHi=0.18;
-  const t=Math.min(1,Math.max(0,(m-lo)/(hi-lo)));
-  return vh*(yLo+t*(yHi-yLo));
+function distToY(m, vh) {
+  const lo=50, hi=2000, yLo=0.72, yHi=0.20;
+  const t = Math.min(1, Math.max(0, (m-lo)/(hi-lo)));
+  return vh * (yLo + t*(yHi-yLo));
 }
 
-/* ─────────────────────────────────────────────
+/* ═══════════════════════════════════════════════════
    CARDS
-───────────────────────────────────────────── */
-function spawnCards(){
-  const cl=document.getElementById('cl');
-  cl.innerHTML=''; cardEls={};
-  let n=0;
+═══════════════════════════════════════════════════ */
+function spawnCards() {
+  const cl = document.getElementById('cl');
+  cl.innerHTML = '';
+  cardEls = {};
+  let shown = 0;
 
-  PLACES.forEach((p,i)=>{
-    const el=document.createElement('div');
-    el.className='card';
-    // Start off-screen visually; positionCards will place it
-    el.style.left='-9999px'; el.style.top='-9999px';
-    const stars='★'.repeat(Math.floor(p.rating))+(p.rating%1>=.5?'½':'');
-    el.innerHTML=`
+  PLACES.forEach((p, i) => {
+    const el = document.createElement('div');
+    el.className = 'card';
+    // Start hidden off-screen; loop() will position and show each frame
+    el.style.cssText = 'left:-9999px;top:-9999px;opacity:0;';
+    const stars = '★'.repeat(Math.floor(p.rating)) + (p.rating%1 >= .5 ? '½' : '');
+    el.innerHTML = `
       <div class="ci">
-        <div class="ccat"><span class="cico">${p.ico}</span><span class="ccat-t">${p.cat}</span></div>
+        <div class="cc"><span class="cico">${p.ico}</span><span class="ccat">${p.cat}</span></div>
         <div class="cname">${p.name}</div>
-        <div class="cmeta">
-          <span class="cstar">${stars}</span>
-          <span class="cdist" id="cd${p.id}">---</span>
+        <div class="cbot">
+          <span class="cst">${stars}</span>
+          <span class="cds" id="cd${p.id}">---</span>
         </div>
       </div>
-      <div class="stem"><div class="sline"></div><div class="sdot"></div></div>`;
-
-    // TAP opens detail — NO drag/move handlers attached at all
-    el.addEventListener('click',()=>openDet(p.id));
-    // Prevent any accidental scroll/pan event from moving the card
-    el.addEventListener('touchstart',e=>e.stopPropagation(),{passive:true});
-
+      <div class="stem"><div class="sln"></div><div class="sdt"></div></div>`;
+    // Click → detail. No move/drag handlers attached — ever.
+    el.addEventListener('click', () => openDet(p.id));
     cl.appendChild(el);
-    cardEls[p.id]=el;
-
-    // Staggered fade-in
-    setTimeout(()=>{
-      el.classList.add('vis');
-      document.getElementById('hcnt').textContent=(++n)+' PLACES';
-    },i*160+400);
+    cardEls[p.id] = el;
+    shown++;
+    document.getElementById('hcnt').textContent = shown + ' PLACES';
   });
 }
 
-/*
-  positionCards — called every rAF frame.
-  Reads current heading + GPS, computes bearing/distance to each place,
-  maps to screen X/Y, sets card position via style.left/style.top.
+/* ═══════════════════════════════════════════════════
+   RENDER LOOP
+   Called every rAF frame. Reads heading + GPS, sets card positions.
+   Because left/top are overwritten every ~16ms, the browser cannot
+   "remember" any user-initiated position change — drag is impossible.
+═══════════════════════════════════════════════════ */
+function loop() {
+  positionCards();
+  updateDebug();
+  requestAnimationFrame(loop);
+}
 
-  Cards outside FOV: opacity 0 (hidden, not removed from DOM).
-  Cards at screen edges: faded + non-interactive.
+const EDGE_PAD = 70; // px — keep card body on-screen
 
-  DRAG FIX: style.left and style.top are SET every single frame from the
-  bearing calculation. Even if the browser somehow moved the element, the
-  next frame (16 ms later) snaps it back. No user input can permanently
-  displace a card.
-*/
-function positionCards(){
-  const vw=window.innerWidth, vh=window.innerHeight;
-  PLACES.forEach(p=>{
-    const el=cardEls[p.id];
-    if(!el) return;
+function positionCards() {
+  const vw = window.innerWidth, vh = window.innerHeight;
+  PLACES.forEach(p => {
+    const el = cardEls[p.id];
+    if (!el) return;
 
-    const b=bearing(userLat,userLng,p.lat,p.lng);
-    const d=dist(userLat,userLng,p.lat,p.lng);
-    const x=bearingToX(b,heading,vw);
+    const b = calcBearing(userLat, userLng, p.lat, p.lng);
+    const d = calcDist(userLat, userLng, p.lat, p.lng);
+    const x = bearingToX(b, heading, vw);
+    const y = distToY(d, vh);
 
-    // Update distance text
-    const de=document.getElementById('cd'+p.id);
-    if(de) de.textContent=fmtD(d);
+    // Update distance label
+    const de = document.getElementById('cd' + p.id);
+    if (de) de.textContent = fmtD(d);
 
-    if(x===null){
-      // Completely outside FOV — invisible, no interaction
-      el.style.opacity='0';
-      el.style.pointerEvents='none';
-      el.classList.remove('edge');
+    if (x === null) {
+      // Outside FOV — fully hide
+      el.style.opacity = '0';
+      el.style.pointerEvents = 'none';
       return;
     }
 
-    const y=distToY(d,vh);
-    // Clamp so card body never goes fully off edge
-    const PAD=75;
-    const cx=Math.max(PAD,Math.min(vw-PAD,x));
-    const edge=Math.abs(cx-x)>1;
+    // Clamp so card never goes fully off screen edge
+    const cx = Math.max(EDGE_PAD, Math.min(vw - EDGE_PAD, x));
+    const atEdge = Math.abs(cx - x) > 1;
 
-    // Set position every frame — this is what prevents "dragging"
-    el.style.left=cx+'px';
-    el.style.top=y+'px';
-    el.style.opacity=edge?'0.2':'';   // '' lets .vis class control it
-    el.style.pointerEvents=edge?'none':'auto';
-    el.classList.toggle('edge',edge);
+    // Write position every single frame — this is what prevents dragging
+    el.style.left = cx + 'px';
+    el.style.top  = y + 'px';
+    el.style.opacity = atEdge ? '0.18' : '1';
+    el.style.pointerEvents = atEdge ? 'none' : 'auto';
   });
 }
 
-/* ─────────────────────────────────────────────
-   SCAN
-───────────────────────────────────────────── */
-function doScan(){
-  if(scanning) return;
-  scanning=true;
-  const btn=document.getElementById('sbtn');
-  btn.classList.add('busy');
-  document.getElementById('cl').innerHTML='';
-  cardEls={};
-  document.getElementById('hcnt').textContent='0 PLACES';
-
-  /* PRODUCTION: re-fetch places from API here using userLat/userLng */
-
-  setTimeout(()=>{
-    btn.classList.remove('busy');
-    scanning=false;
-    spawnCards();
-  },1300);
+/* ═══════════════════════════════════════════════════
+   DEBUG BAR  (tap logo 3× to toggle)
+═══════════════════════════════════════════════════ */
+let _dbtaps = 0, _dbtimer;
+function dbgTap() {
+  _dbtaps++;
+  clearTimeout(_dbtimer);
+  _dbtimer = setTimeout(() => _dbtaps = 0, 800);
+  if (_dbtaps >= 3) {
+    _dbtaps = 0;
+    document.getElementById('dbbar').classList.toggle('on');
+  }
+}
+function updateDebug() {
+  const bar = document.getElementById('dbbar');
+  if (!bar.classList.contains('on')) return;
+  const vw = window.innerWidth;
+  const lines = PLACES.map(p => {
+    const b = Math.round(calcBearing(userLat, userLng, p.lat, p.lng));
+    const d = fmtD(calcDist(userLat, userLng, p.lat, p.lng));
+    const x = bearingToX(b, heading, vw);
+    const vis = x !== null ? 'VISIBLE x=' + Math.round(x) : 'HIDDEN';
+    return `${p.name.slice(0,12).padEnd(12)} brg=${String(b).padStart(3)}° ${d.padStart(6)} ${vis}`;
+  });
+  bar.innerHTML = `<b>HDG:${Math.round(heading)}° FOV:${FOV}° GPS:${userLat.toFixed(4)},${userLng.toFixed(4)} compass:${compassActive}</b><br>` + lines.join('<br>');
 }
 
-/* ─────────────────────────────────────────────
+/* ═══════════════════════════════════════════════════
+   SCAN
+═══════════════════════════════════════════════════ */
+function doScan() {
+  if (scanning) return;
+  scanning = true;
+  const btn = document.getElementById('sbt');
+  btn.classList.add('busy');
+  document.getElementById('cl').innerHTML = '';
+  cardEls = {};
+  document.getElementById('hcnt').textContent = '0 PLACES';
+  /* PRODUCTION: re-fetch from API using current GPS coords */
+  setTimeout(() => {
+    btn.classList.remove('busy');
+    scanning = false;
+    spawnCards();
+  }, 1200);
+}
+
+/* ═══════════════════════════════════════════════════
    DETAIL PANEL
-   PRODUCTION HOOK: uncomment Claude API block for live descriptions
-───────────────────────────────────────────── */
-function openDet(id){
-  const p=PLACES.find(x=>x.id===id); if(!p) return;
-  const d=fmtD(dist(userLat,userLng,p.lat,p.lng));
-  const s='★'.repeat(Math.floor(p.rating))+(p.rating%1>=.5?'½':'');
-  document.getElementById('dchip').innerHTML=`<span style="font-size:15px">${p.ico}</span> ${p.cat}`;
-  document.getElementById('dico').textContent=p.ico;
-  document.getElementById('dname').textContent=p.name;
-  document.getElementById('dstar').textContent=s;
-  document.getElementById('drev').textContent=p.rev.toLocaleString()+' REVIEWS';
-  document.getElementById('ddist').textContent='◎ '+d;
-  document.getElementById('dabout').textContent=p.about;
-  document.getElementById('dhours').innerHTML=p.hours.map(h=>`<div class="hr"><span>${h.d}</span><span>${h.t}</span></div>`).join('');
-  document.getElementById('dtags').innerHTML=p.tags.map(t=>`<span class="tag">${t}</span>`).join('');
-  /* PRODUCTION: Claude API for richer descriptions:
-  fetch('https://api.anthropic.com/v1/messages',{method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:200,
-      messages:[{role:'user',content:`2-sentence insider tip for ${p.name} in Dubai. What do most tourists miss?`}]})
-  }).then(r=>r.json()).then(d=>{ document.getElementById('dabout').textContent=d.content[0].text; });
+═══════════════════════════════════════════════════ */
+function openDet(id) {
+  const p = PLACES.find(x => x.id === id);
+  if (!p) return;
+  const d = fmtD(calcDist(userLat, userLng, p.lat, p.lng));
+  const s = '★'.repeat(Math.floor(p.rating)) + (p.rating%1 >= .5 ? '½' : '');
+  document.getElementById('dchip').innerHTML = `<span style="font-size:14px">${p.ico}</span> ${p.cat}`;
+  document.getElementById('dico').textContent = p.ico;
+  document.getElementById('dnam').textContent = p.name;
+  document.getElementById('dst').textContent  = s;
+  document.getElementById('drv').textContent  = p.rev.toLocaleString() + ' REVIEWS';
+  document.getElementById('dbd').textContent  = '◎ ' + d;
+  document.getElementById('dabt').textContent = p.about;
+  document.getElementById('dhr').innerHTML    = p.hours.map(h => `<div class="dhrr"><span>${h.d}</span><span>${h.t}</span></div>`).join('');
+  document.getElementById('dtgs').innerHTML   = p.tags.map(t => `<span class="tag">${t}</span>`).join('');
+  /* PRODUCTION — Claude API for richer descriptions:
+  fetch('https://api.anthropic.com/v1/messages',{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:180,
+      messages:[{role:'user',content:`2-sentence insider tip for visiting ${p.name} in Dubai. What do most tourists miss?`}]})
+  }).then(r=>r.json()).then(d=>{ document.getElementById('dabt').textContent=d.content[0].text; });
   */
   document.getElementById('det').classList.add('open');
 }
-function closeDet(){ document.getElementById('det').classList.remove('open'); }
+function closeDet() { document.getElementById('det').classList.remove('open'); }
 
-/* ─────────────────────────────────────────────
+/* ═══════════════════════════════════════════════════
    UTILS
-───────────────────────────────────────────── */
-function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+═══════════════════════════════════════════════════ */
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 let _tt;
-function toast(msg){
+function showToast(msg) {
   clearTimeout(_tt);
-  const t=document.getElementById('toastEl');
-  t.textContent=msg; t.classList.add('on');
-  _tt=setTimeout(()=>t.classList.remove('on'),1800);
+  const t = document.getElementById('toastEl');
+  t.textContent = msg; t.classList.add('on');
+  _tt = setTimeout(() => t.classList.remove('on'), 1800);
 }
 
-// Allow scrolling only inside detail panel
-document.addEventListener('touchmove',e=>{
-  if(!e.target.closest('#det')) e.preventDefault();
-},{passive:false});
+// Only allow scrolling inside the detail panel
+document.addEventListener('touchmove', e => {
+  if (!e.target.closest('#det')) e.preventDefault();
+}, { passive: false });
 
-document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeDet(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDet(); });
 </script>
 </body>
 </html>
