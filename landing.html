@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AR Locator — See Your World</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&family=DM+Mono:wght@300;400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --black: #0a0a0a;
+  --white: #fafafa;
+  --gray: #e8e8e8;
+  --mid: #999;
+  --accent: #ff4d2e;
+  --accent2: #0057ff;
+  --mono: 'DM Mono', monospace;
+  --sans: 'DM Sans', sans-serif;
+  --display: 'Bebas Neue', sans-serif;
+}
+
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--white);
+  color: var(--black);
+  font-family: var(--sans);
+  font-weight: 300;
+  overflow-x: hidden;
+  cursor: none;
+}
+
+/* ── Custom cursor ── */
+#cursor {
+  position: fixed; z-index: 9999; pointer-events: none;
+  width: 10px; height: 10px;
+  background: var(--accent);
+  border-radius: 50%;
+  transform: translate(-50%,-50%);
+  transition: transform .15s, width .2s, height .2s, background .2s;
+  mix-blend-mode: multiply;
+}
+#cursor.big { width:40px; height:40px; background:var(--accent); opacity:.3; }
+
+/* ── Nav ── */
+nav {
+  position: fixed; top:0; left:0; right:0; z-index: 100;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 20px 48px;
+  background: rgba(250,250,250,0.9);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--gray);
+}
+.nav-logo {
+  font-family: var(--display);
+  font-size: 22px;
+  letter-spacing: 0.05em;
+  color: var(--black);
+  text-decoration: none;
+}
+.nav-logo span { color: var(--accent); }
+.nav-links { display: flex; gap: 32px; list-style: none; }
+.nav-links a {
+  font-size: 13px; font-weight: 400; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--black); text-decoration: none;
+  opacity: 0.5; transition: opacity .2s;
+}
+.nav-links a:hover { opacity: 1; }
+.nav-cta {
+  font-size: 12px; font-weight: 500; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--white);
+  background: var(--black); border: none; cursor: none;
+  padding: 10px 24px; border-radius: 2px;
+  text-decoration: none; transition: background .2s;
+}
+.nav-cta:hover { background: var(--accent); }
+
+/* ── Hero ── */
+#hero {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding-top: 80px;
+  overflow: hidden;
+  position: relative;
+}
+
+.hero-left {
+  display: flex; flex-direction: column; justify-content: center;
+  padding: 80px 64px 80px 48px;
+  position: relative; z-index: 2;
+}
+
+.hero-eyebrow {
+  font-family: var(--mono);
+  font-size: 11px; font-weight: 300;
+  letter-spacing: 0.15em; text-transform: uppercase;
+  color: var(--accent); margin-bottom: 24px;
+  display: flex; align-items: center; gap: 10px;
+}
+.hero-eyebrow::before {
+  content:''; display:block;
+  width:28px; height:1px; background:var(--accent);
+}
+
+.hero-h1 {
+  font-family: var(--display);
+  font-size: clamp(72px, 8vw, 120px);
+  line-height: 0.92;
+  letter-spacing: 0.02em;
+  color: var(--black);
+  margin-bottom: 32px;
+}
+.hero-h1 em {
+  font-style: normal;
+  color: var(--accent);
+  display: block;
+}
+
+.hero-sub {
+  font-size: 17px; font-weight: 300; line-height: 1.7;
+  color: #555; max-width: 400px; margin-bottom: 48px;
+}
+
+.hero-actions { display: flex; gap: 16px; align-items: center; }
+
+.btn-primary {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 16px 32px; background: var(--black); color: var(--white);
+  font-size: 13px; font-weight: 500; letter-spacing: 0.06em;
+  text-transform: uppercase; text-decoration: none;
+  border-radius: 2px; transition: background .2s, gap .2s;
+  cursor: none;
+}
+.btn-primary:hover { background: var(--accent); gap: 16px; }
+.btn-primary .arr { font-size: 18px; }
+
+.btn-secondary {
+  font-size: 13px; font-weight: 400; letter-spacing: 0.04em;
+  color: var(--black); text-decoration: none; opacity: 0.5;
+  border-bottom: 1px solid transparent; transition: opacity .2s, border-color .2s;
+  cursor: none;
+}
+.btn-secondary:hover { opacity:1; border-color: var(--black); }
+
+.hero-stats {
+  display: flex; gap: 40px; margin-top: 64px;
+  padding-top: 32px; border-top: 1px solid var(--gray);
+}
+.stat-num {
+  font-family: var(--display); font-size: 36px; letter-spacing: 0.02em;
+  color: var(--black); display: block;
+}
+.stat-lbl {
+  font-size: 11px; font-weight: 400; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--mid);
+}
+
+/* ── Hero right: AR phone mockup ── */
+.hero-right {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  background: var(--black);
+  overflow: hidden;
+}
+
+.hero-right::before {
+  content: '';
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(rgba(255,77,46,0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,77,46,0.08) 1px, transparent 1px);
+  background-size: 40px 40px;
+  animation: gridDrift 20s linear infinite;
+}
+@keyframes gridDrift { to { background-position: 40px 40px; } }
+
+.hero-right::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse at center, transparent 30%, var(--black) 80%);
+}
+
+.phone-wrap {
+  position: relative; z-index: 2;
+  width: 220px;
+  animation: float 4s ease-in-out infinite;
+}
+@keyframes float {
+  0%,100% { transform: translateY(0); }
+  50%      { transform: translateY(-16px); }
+}
+
+.phone {
+  width: 220px; height: 440px;
+  background: #111;
+  border-radius: 36px;
+  border: 2px solid #333;
+  position: relative; overflow: hidden;
+  box-shadow: 0 40px 80px rgba(0,0,0,0.8), 0 0 0 1px #222;
+}
+
+/* Phone notch */
+.phone-notch {
+  position: absolute; top:12px; left:50%; transform:translateX(-50%);
+  width:80px; height:8px; background:#000; border-radius:4px; z-index:10;
+}
+
+/* Simulated AR screen */
+.phone-screen {
+  position: absolute; inset:0;
+  background: linear-gradient(165deg, #0d1a2e 0%, #0a1208 60%, #1a0d08 100%);
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* AR grid on screen */
+.ar-grid {
+  position: absolute; inset:0;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/* Compass strip */
+.phone-compass {
+  position: absolute; top: 28px; left:0; right:0;
+  height: 24px; background: rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono); font-size: 9px; color: rgba(255,255,255,0.6);
+  letter-spacing: 0.1em;
+}
+.phone-compass span { color: #ff5544; margin-right: 4px; font-weight:400; }
+
+/* AR pins on phone */
+.ar-pin {
+  position: absolute;
+  display: flex; flex-direction: column; align-items: center;
+}
+.ar-dot {
+  width: 22px; height: 22px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; position: relative;
+}
+.ar-dot::before {
+  content:'';
+  position: absolute; inset: -5px;
+  border-radius: 50%; border: 1px solid currentColor;
+  opacity: 0.3;
+  animation: ping 2s ease-in-out infinite;
+}
+@keyframes ping {
+  0%,100% { transform: scale(1); opacity:0.3; }
+  50%      { transform: scale(1.3); opacity:0.1; }
+}
+.ar-pill {
+  margin-top: 4px;
+  background: rgba(0,0,0,0.8); border-radius: 4px;
+  padding: 3px 7px; white-space: nowrap;
+  font-family: var(--mono); font-size: 7px;
+  border-left: 2px solid currentColor;
+  animation: pillFade 3s ease-in-out infinite;
+}
+@keyframes pillFade {
+  0%,100% { opacity: 0.9; }
+  50%      { opacity: 0.6; }
+}
+.ar-pin:nth-child(2) .ar-dot::before { animation-delay: .6s; }
+.ar-pin:nth-child(3) .ar-dot::before { animation-delay: 1.2s; }
+.ar-pin:nth-child(4) .ar-dot::before { animation-delay: .3s; }
+.ar-pin:nth-child(5) .ar-dot::before { animation-delay: .9s; }
+
+/* Crosshair on phone */
+.ar-cross {
+  position: absolute; top:50%; left:50%;
+  transform: translate(-50%,-50%);
+  width: 30px; height: 30px;
+}
+.ar-cross::before, .ar-cross::after {
+  content:''; position:absolute;
+  background: rgba(255,255,255,0.3);
+}
+.ar-cross::before { width:1px; height:100%; left:50%; top:0; }
+.ar-cross::after  { height:1px; width:100%; top:50%; left:0; }
+
+/* Distance label */
+.ar-dist-label {
+  position: absolute; bottom: 12px; left:0; right:0;
+  text-align: center;
+  font-family: var(--mono); font-size: 8px; color: rgba(255,255,255,0.35);
+  letter-spacing: 0.1em;
+}
+
+/* Floating data chips around phone */
+.float-chip {
+  position: absolute; z-index: 3;
+  background: var(--white); border: 1px solid var(--gray);
+  border-radius: 8px; padding: 10px 14px;
+  display: flex; align-items: center; gap: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  animation: chipFloat 5s ease-in-out infinite;
+  white-space: nowrap;
+}
+.float-chip .chip-icon { font-size: 18px; }
+.float-chip .chip-text { font-size: 12px; font-weight: 400; }
+.float-chip .chip-sub  { font-size: 10px; color: var(--mid); margin-top: 1px; }
+
+.fc1 { left:-60px; top:20%; animation-delay: 0s; }
+.fc2 { right:-70px; top:35%; animation-delay: 1.5s; }
+.fc3 { left:-50px; bottom:22%; animation-delay: .8s; }
+@keyframes chipFloat {
+  0%,100% { transform: translateY(0); }
+  50%      { transform: translateY(-6px); }
+}
+
+/* ── Section shared ── */
+section { padding: 120px 48px; }
+.section-tag {
+  font-family: var(--mono); font-size: 11px;
+  letter-spacing: 0.15em; text-transform: uppercase;
+  color: var(--accent); margin-bottom: 16px;
+}
+.section-h2 {
+  font-family: var(--display); font-size: clamp(48px, 5vw, 72px);
+  line-height: 0.95; letter-spacing: 0.02em;
+  color: var(--black); margin-bottom: 24px;
+}
+
+/* ── How it works ── */
+#how {
+  background: var(--black); color: var(--white);
+  display: grid; grid-template-columns: 1fr 2fr; gap: 80px;
+  align-items: start;
+}
+#how .section-h2 { color: var(--white); }
+#how .section-tag { color: var(--accent); }
+
+.steps { display: flex; flex-direction: column; gap: 0; }
+.step {
+  display: grid; grid-template-columns: 64px 1fr;
+  gap: 24px; align-items: start;
+  padding: 32px 0; border-bottom: 1px solid #1e1e1e;
+  opacity: 0; transform: translateX(24px);
+  transition: opacity .5s, transform .5s;
+}
+.step.visible { opacity:1; transform: none; }
+.step:last-child { border-bottom: none; }
+.step-num {
+  font-family: var(--display); font-size: 56px;
+  color: #1e1e1e; line-height: 1; user-select: none;
+  transition: color .3s;
+}
+.step:hover .step-num { color: var(--accent); }
+.step-title {
+  font-size: 20px; font-weight: 400; margin-bottom: 8px;
+  color: var(--white);
+}
+.step-body { font-size: 14px; line-height: 1.7; color: #777; }
+
+/* ── Features grid ── */
+#features { background: var(--white); }
+.features-header {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 48px; align-items: end; margin-bottom: 64px;
+}
+.features-intro { font-size: 15px; line-height: 1.8; color: #666; max-width: 360px; }
+
+.feat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px; background: var(--gray);
+  border: 1px solid var(--gray);
+}
+.feat-card {
+  background: var(--white);
+  padding: 36px 32px;
+  transition: background .2s;
+  opacity: 0; transform: translateY(20px);
+  transition: opacity .5s, transform .5s, background .2s;
+}
+.feat-card.visible { opacity:1; transform: none; }
+.feat-card:hover { background: #f5f5f5; }
+.feat-icon {
+  font-size: 28px; margin-bottom: 20px; display: block;
+}
+.feat-title {
+  font-size: 17px; font-weight: 500; margin-bottom: 10px; color: var(--black);
+}
+.feat-body { font-size: 13px; line-height: 1.7; color: #777; }
+.feat-card:nth-child(1) { transition-delay: 0s; }
+.feat-card:nth-child(2) { transition-delay: .08s; }
+.feat-card:nth-child(3) { transition-delay: .16s; }
+.feat-card:nth-child(4) { transition-delay: .24s; }
+.feat-card:nth-child(5) { transition-delay: .32s; }
+.feat-card:nth-child(6) { transition-delay: .40s; }
+
+/* ── Categories ticker ── */
+#categories {
+  padding: 48px 0;
+  border-top: 1px solid var(--gray);
+  border-bottom: 1px solid var(--gray);
+  overflow: hidden;
+}
+.ticker-wrap { display: flex; gap: 0; }
+.ticker {
+  display: flex; gap: 0;
+  animation: ticker 28s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes ticker { to { transform: translateX(-50%); } }
+.ticker-item {
+  padding: 0 32px;
+  font-family: var(--display); font-size: 22px;
+  letter-spacing: 0.04em; color: var(--black); opacity: 0.15;
+  display: flex; align-items: center; gap: 12px;
+  white-space: nowrap; border-right: 1px solid var(--gray);
+}
+.ticker-item:hover { opacity: 0.6; }
+
+/* ── CTA section ── */
+#cta {
+  background: var(--black);
+  min-height: 60vh;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center; padding: 100px 48px;
+  position: relative; overflow: hidden;
+}
+#cta::before {
+  content: '';
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(rgba(255,77,46,0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,87,255,0.06) 1px, transparent 1px);
+  background-size: 60px 60px;
+}
+#cta::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse at 50% 50%, rgba(255,77,46,0.06) 0%, transparent 70%);
+}
+.cta-inner { position: relative; z-index: 2; }
+.cta-h2 {
+  font-family: var(--display);
+  font-size: clamp(64px, 10vw, 140px);
+  line-height: 0.88; letter-spacing: 0.02em;
+  color: var(--white); margin-bottom: 32px;
+}
+.cta-h2 em { color: var(--accent); font-style: normal; display:block; }
+.cta-sub {
+  font-size: 15px; font-weight: 300; line-height: 1.7;
+  color: #777; max-width: 420px; margin: 0 auto 48px;
+}
+.btn-large {
+  display: inline-flex; align-items: center; gap: 12px;
+  padding: 20px 48px; background: var(--white); color: var(--black);
+  font-size: 14px; font-weight: 500; letter-spacing: 0.08em;
+  text-transform: uppercase; text-decoration: none;
+  border-radius: 2px; transition: background .2s, color .2s, gap .2s;
+  cursor: none;
+}
+.btn-large:hover { background: var(--accent); color: var(--white); gap: 20px; }
+
+/* ── Footer ── */
+footer {
+  padding: 40px 48px;
+  border-top: 1px solid var(--gray);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.footer-logo {
+  font-family: var(--display); font-size: 20px;
+  letter-spacing: 0.05em; color: var(--black); text-decoration: none;
+}
+.footer-logo span { color: var(--accent); }
+.footer-copy { font-size: 12px; color: var(--mid); font-family: var(--mono); }
+
+/* ── Scroll reveal base ── */
+.reveal {
+  opacity: 0; transform: translateY(30px);
+  transition: opacity .65s ease, transform .65s ease;
+}
+.reveal.visible { opacity:1; transform: none; }
+
+/* ── Responsive ── */
+@media (max-width: 900px) {
+  #hero { grid-template-columns: 1fr; }
+  .hero-right { min-height: 60vw; }
+  .float-chip { display: none; }
+  #how { grid-template-columns: 1fr; }
+  .features-header { grid-template-columns: 1fr; }
+  .feat-grid { grid-template-columns: 1fr 1fr; }
+  nav { padding: 16px 24px; }
+  .nav-links { display:none; }
+  section { padding: 80px 24px; }
+}
+@media (max-width: 600px) {
+  .feat-grid { grid-template-columns: 1fr; }
+  .hero-stats { gap: 24px; }
+}
+</style>
+</head>
+<body>
+
+<div id="cursor"></div>
+
+<!-- ── Nav ── -->
+<nav>
+  <a class="nav-logo" href="#">AR<span>.</span>LOCATOR</a>
+  <ul class="nav-links">
+    <li><a href="#how">How it works</a></li>
+    <li><a href="#features">Features</a></li>
+    <li><a href="#cta">Get started</a></li>
+  </ul>
+  <a class="nav-cta" href="index.html">Open App →</a>
+</nav>
+
+<!-- ── Hero ── -->
+<section id="hero">
+  <div class="hero-left">
+    <p class="hero-eyebrow">Spatial discovery · v2.0</p>
+    <h1 class="hero-h1">
+      SEE<br>YOUR<br><em>WORLD.</em>
+    </h1>
+    <p class="hero-sub">
+      Point your camera at any street and instantly see what's around you — restaurants, cafés, ATMs, hotels — live from OpenStreetMap.
+    </p>
+    <div class="hero-actions">
+      <a class="btn-primary" href="index.html">
+        <span>Launch AR</span><span class="arr">→</span>
+      </a>
+      <a class="btn-secondary" href="#how">How it works</a>
+    </div>
+    <div class="hero-stats">
+      <div>
+        <span class="stat-num">100+</span>
+        <span class="stat-lbl">Places per scan</span>
+      </div>
+      <div>
+        <span class="stat-num">1km</span>
+        <span class="stat-lbl">Radius</span>
+      </div>
+      <div>
+        <span class="stat-num">10+</span>
+        <span class="stat-lbl">Categories</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="hero-right">
+    <!-- Floating chips -->
+    <div class="float-chip fc1">
+      <span class="chip-icon">🍽️</span>
+      <div>
+        <div class="chip-text">Zuma Restaurant</div>
+        <div class="chip-sub">120m away</div>
+      </div>
+    </div>
+    <div class="float-chip fc2">
+      <span class="chip-icon">🏦</span>
+      <div>
+        <div class="chip-text">Emirates NBD ATM</div>
+        <div class="chip-sub">45m away</div>
+      </div>
+    </div>
+    <div class="float-chip fc3">
+      <span class="chip-icon">☕</span>
+      <div>
+        <div class="chip-text">% Arabica Coffee</div>
+        <div class="chip-sub">210m away</div>
+      </div>
+    </div>
+
+    <!-- Phone mockup -->
+    <div class="phone-wrap">
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <div class="phone-screen">
+          <div class="ar-grid"></div>
+
+          <!-- Compass -->
+          <div class="phone-compass">
+            <span>N</span> &nbsp; NE &nbsp; E &nbsp; SE &nbsp; <span style="color:#fff;opacity:.5">S</span>
+          </div>
+
+          <!-- AR pins -->
+          <div class="ar-pin" style="left:30%;top:35%">
+            <div class="ar-dot" style="background:#ff664455;color:#ff6644">🍽️</div>
+            <div class="ar-pill" style="color:#ff6644">Zuma · 120m</div>
+          </div>
+          <div class="ar-pin" style="left:58%;top:28%">
+            <div class="ar-dot" style="background:#44aaff33;color:#44aaff">🏦</div>
+            <div class="ar-pill" style="color:#44aaff">ATM · 45m</div>
+          </div>
+          <div class="ar-pin" style="left:20%;top:52%">
+            <div class="ar-dot" style="background:#ffaa4433;color:#ffaa44">☕</div>
+            <div class="ar-pill" style="color:#ffaa44">Arabica · 210m</div>
+          </div>
+          <div class="ar-pin" style="left:68%;top:48%">
+            <div class="ar-dot" style="background:#44ff8833;color:#44ff88">🏥</div>
+            <div class="ar-pill" style="color:#44ff88">Clinic · 340m</div>
+          </div>
+          <div class="ar-pin" style="left:44%;top:62%">
+            <div class="ar-dot" style="background:#aa88ff33;color:#aa88ff">🏨</div>
+            <div class="ar-pill" style="color:#aa88ff">Armani · 80m</div>
+          </div>
+
+          <!-- Crosshair -->
+          <div class="ar-cross"></div>
+
+          <!-- Distance label -->
+          <div class="ar-dist-label">hdg: 042° · 5 pins visible · gps: 25.2048, 55.2708</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Category ticker ── -->
+<div id="categories">
+  <div class="ticker-wrap">
+    <div class="ticker">
+      <div class="ticker-item">🍽️ Food</div>
+      <div class="ticker-item">☕ Cafés</div>
+      <div class="ticker-item">🏬 Shops</div>
+      <div class="ticker-item">🏨 Hotels</div>
+      <div class="ticker-item">🕌 Worship</div>
+      <div class="ticker-item">💊 Health</div>
+      <div class="ticker-item">🏦 Banking</div>
+      <div class="ticker-item">🚌 Transport</div>
+      <div class="ticker-item">🎭 Leisure</div>
+      <div class="ticker-item">⭐ Attractions</div>
+      <div class="ticker-item">🍽️ Food</div>
+      <div class="ticker-item">☕ Cafés</div>
+      <div class="ticker-item">🏬 Shops</div>
+      <div class="ticker-item">🏨 Hotels</div>
+      <div class="ticker-item">🕌 Worship</div>
+      <div class="ticker-item">💊 Health</div>
+      <div class="ticker-item">🏦 Banking</div>
+      <div class="ticker-item">🚌 Transport</div>
+      <div class="ticker-item">🎭 Leisure</div>
+      <div class="ticker-item">⭐ Attractions</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── How it works ── -->
+<section id="how">
+  <div>
+    <p class="section-tag">The process</p>
+    <h2 class="section-h2">HOW<br>IT<br>WORKS.</h2>
+  </div>
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">01</div>
+      <div>
+        <div class="step-title">Grant camera & location</div>
+        <div class="step-body">One tap. Your camera becomes a window into the map layer. No app store, no install — runs in your browser.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">02</div>
+      <div>
+        <div class="step-title">We fetch your surroundings</div>
+        <div class="step-body">Live data pulled from OpenStreetMap within a 1km radius — up to 100 places across 10 categories in under 2 seconds.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">03</div>
+      <div>
+        <div class="step-title">Point. See. Explore.</div>
+        <div class="step-body">Your compass heading determines what's on screen. Turn left or right and pins shift with you in real time. Far places float high, near ones sit low.</div>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">04</div>
+      <div>
+        <div class="step-title">Filter by category</div>
+        <div class="step-body">Tap a category chip to focus only on what you need — all other pins disappear. Switch instantly, no reload.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Features ── -->
+<section id="features">
+  <div class="features-header">
+    <div>
+      <p class="section-tag reveal">What's inside</p>
+      <h2 class="section-h2 reveal">BUILT<br>DIFFERENT.</h2>
+    </div>
+    <p class="features-intro reveal">No app. No subscription. No ads. Just your camera, your GPS, and OpenStreetMap — rendered as a spatial layer in real time.</p>
+  </div>
+  <div class="feat-grid">
+    <div class="feat-card">
+      <span class="feat-icon">📡</span>
+      <div class="feat-title">Live OSM data</div>
+      <div class="feat-body">Pulls directly from OpenStreetMap's Overpass API. Always current, community-maintained, globally available.</div>
+    </div>
+    <div class="feat-card">
+      <span class="feat-icon">🧭</span>
+      <div class="feat-title">Real compass heading</div>
+      <div class="feat-body">Uses device orientation sensors — gyroscope, magnetometer — to track exactly which direction you're facing.</div>
+    </div>
+    <div class="feat-card">
+      <span class="feat-icon">🔍</span>
+      <div class="feat-title">Overlap-aware rendering</div>
+      <div class="feat-body">When pins cluster, crowded ones collapse to icon-only bubbles. No label soup. Always readable.</div>
+    </div>
+    <div class="feat-card">
+      <span class="feat-icon">🎨</span>
+      <div class="feat-title">Category colors</div>
+      <div class="feat-body">Each category has its own color. Scan the scene visually — no need to read every label to find food vs. banking.</div>
+    </div>
+    <div class="feat-card">
+      <span class="feat-icon">📱</span>
+      <div class="feat-title">No install needed</div>
+      <div class="feat-body">Pure HTML, CSS, and JavaScript. Open in any mobile browser. Share a link. Done. No App Store friction.</div>
+    </div>
+    <div class="feat-card">
+      <span class="feat-icon">🌐</span>
+      <div class="feat-title">Works everywhere</div>
+      <div class="feat-body">OSM covers the entire planet. Dubai, Tokyo, Lagos — if it's on the map, it shows up in your camera.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ── CTA ── -->
+<section id="cta">
+  <div class="cta-inner reveal">
+    <h2 class="cta-h2">LOOK<br><em>UP.</em></h2>
+    <p class="cta-sub">Stop staring at a 2D map. Point your phone and see the world as a live spatial layer.</p>
+    <a class="btn-large" href="index.html">Launch AR Locator →</a>
+  </div>
+</section>
+
+<!-- ── Footer ── -->
+<footer>
+  <a class="footer-logo" href="#">AR<span>.</span>LOCATOR</a>
+  <span class="footer-copy">Built on OpenStreetMap · No tracking · Open source</span>
+</footer>
+
+<script>
+// ── Custom cursor ──────────────────────────────────────────────────────────
+const cur = document.getElementById('cursor');
+document.addEventListener('mousemove', e => {
+  cur.style.left = e.clientX + 'px';
+  cur.style.top  = e.clientY + 'px';
+});
+document.querySelectorAll('a, button, .step, .feat-card, .ticker-item').forEach(el => {
+  el.addEventListener('mouseenter', () => cur.classList.add('big'));
+  el.addEventListener('mouseleave', () => cur.classList.remove('big'));
+});
+
+// ── Scroll reveal ──────────────────────────────────────────────────────────
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+}, { threshold: 0.12 });
+
+document.querySelectorAll('.reveal, .step, .feat-card').forEach(el => observer.observe(el));
+
+// Stagger step delays
+document.querySelectorAll('.step').forEach((el, i) => {
+  el.style.transitionDelay = (i * 0.1) + 's';
+});
+</script>
+</body>
+</html>
