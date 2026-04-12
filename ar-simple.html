@@ -13,55 +13,42 @@ canvas { position:fixed; inset:0; width:100%; height:100%; z-index:1; }
 .panel {
   position:fixed; inset:0; z-index:10; background:#000;
   display:flex; flex-direction:column; align-items:center; justify-content:center;
-  gap:20px; padding:40px 28px; text-align:center;
+  gap:24px; padding:40px 28px; text-align:center;
 }
 .panel.hidden { display:none; }
-h2 { font-size:22px; }
-p  { font-size:13px; color:#999; line-height:1.9; max-width:290px; }
+h2 { font-size:24px; }
+p  { font-size:14px; color:#999; line-height:1.9; max-width:290px; }
 em { color:#ffcc00; font-style:normal; font-weight:bold; }
 
 .btn {
-  width:100%; max-width:300px; padding:18px;
-  font-size:16px; font-weight:bold;
-  border:none; border-radius:10px; cursor:pointer;
+  width:100%; max-width:300px; padding:20px;
+  font-size:17px; font-weight:bold;
+  border:none; border-radius:12px; cursor:pointer;
 }
 .btn-white  { background:#fff; color:#000; }
-.btn-yellow { background:#ffcc00; color:#000; font-size:18px; padding:20px; }
+.btn-yellow { background:#ffcc00; color:#000; font-size:19px; }
 
-#recalib {
-  position:fixed; bottom:54px; left:50%; transform:translateX(-50%);
-  z-index:5; display:none;
-  background:rgba(255,204,0,0.9); color:#000;
-  border:none; border-radius:8px; padding:12px 28px;
-  font-size:14px; font-weight:bold; cursor:pointer;
-}
 #debug {
   position:fixed; bottom:8px; left:8px; right:8px; z-index:5;
   font-size:11px; color:rgba(255,255,255,0.8);
   background:rgba(0,0,0,0.65); padding:8px 10px;
-  border-radius:6px; line-height:2;
+  border-radius:6px; line-height:2; font-family:monospace;
 }
 </style>
 </head>
 <body>
 
+<!-- Step 1: Request motion permission (must be a direct user tap on iOS) -->
 <div class="panel" id="p1">
   <h2>AR Locator</h2>
-  <p>Tap to allow <em>camera</em>, <em>location</em> and <em>motion</em>.</p>
-  <button class="btn btn-white" onclick="startAR()">Allow &amp; Start</button>
-</div>
-
-<div class="panel hidden" id="p2">
-  <div style="font-size:64px">🧭</div>
-  <h2>Point North</h2>
-  <p>Rotate your phone/tablet to face <em>North</em>, then tap:</p>
-  <button class="btn btn-yellow" onclick="calibrate()">✓ I am pointing North</button>
+  <p>Tap below — iOS requires a <em>direct tap</em> to enable the compass.</p>
+  <button class="btn btn-white" id="startBtn" onclick="requestMotion()">Enable Compass &amp; Start</button>
+  <p id="status" style="font-size:12px;color:#555"></p>
 </div>
 
 <video id="vid" autoplay playsinline muted></video>
 <canvas id="cv"></canvas>
-<button id="recalib" onclick="showCalib()">🧭 Recalibrate North</button>
-<div id="debug">—</div>
+<div id="debug">waiting…</div>
 
 <script>
 const PLACES = [
@@ -74,115 +61,81 @@ const PLACES = [
 
 const canvas = document.getElementById('cv');
 const ctx    = canvas.getContext('2d');
-let userLat = 25.2120, userLng = 55.2817;
-let absHeading = null;
-let rawAlpha   = null;
-let northAlpha = null;
-let calibrated = false;
-let method     = 'none';
+let userLat  = 25.2120, userLng = 55.2817;
+let compass  = null;  // live heading from webkitCompassHeading
 let eventCount = 0;
 
 function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
 window.addEventListener('resize', resize);
 resize();
 
-function getHeading() {
-  if (absHeading !== null) return absHeading;
-  if (!calibrated || rawAlpha === null) return null;
-  return ((rawAlpha - northAlpha) + 360) % 360;
-}
-
-function showCalib() {
-  calibrated = false;
-  document.getElementById('p2').classList.remove('hidden');
-  document.getElementById('recalib').style.display = 'none';
-}
-
-function calibrate() {
-  northAlpha = rawAlpha ?? 0;
-  calibrated = true;
-  document.getElementById('p2').classList.add('hidden');
-  document.getElementById('recalib').style.display = 'block';
-}
-
-function onAbsolute(h, src) {
-  absHeading = h;
-  method = src;
-  calibrated = true;
-  document.getElementById('p2').classList.add('hidden');
-  document.getElementById('recalib').style.display = 'none';
-}
-
-// ── Sensor handler ──
-function handleOrientation(e) {
+// ── Core orientation handler — reads webkitCompassHeading directly ──
+function onOrientation(e) {
   eventCount++;
-
-  // iOS webkitCompassHeading — true north, no calibration needed
   if (typeof e.webkitCompassHeading === 'number' && e.webkitCompassHeading >= 0) {
-    onAbsolute(e.webkitCompassHeading, 'iOS webkit');
-    return;
-  }
-
-  // Absolute alpha — true north on Android
-  if (e.absolute === true && e.alpha != null) {
-    onAbsolute((360 - e.alpha) % 360, 'absolute alpha');
-    return;
-  }
-
-  // Relative alpha — needs North calibration
-  if (e.alpha != null) {
-    rawAlpha = e.alpha;
-    method   = 'relative (needs calib)';
+    compass = e.webkitCompassHeading;
   }
 }
 
-function attachListeners() {
-  window.addEventListener('deviceorientationabsolute', handleOrientation, true);
-  window.addEventListener('deviceorientation',         handleOrientation, true);
-}
+// ── Request motion permission then start ──
+async function requestMotion() {
+  document.getElementById('status').textContent = 'Requesting permission…';
 
-// ── Try AbsoluteOrientationSensor (Chrome Android/iPad) ──
-async function tryNewSensorAPI() {
-  if (!('AbsoluteOrientationSensor' in window)) return false;
+  // 1. Camera
   try {
-    // Request all three permissions it needs
-    const perms = await Promise.all([
-      navigator.permissions.query({ name: 'accelerometer' }),
-      navigator.permissions.query({ name: 'magnetometer' }),
-      navigator.permissions.query({ name: 'gyroscope' }),
-    ]);
-    if (perms.some(p => p.state === 'denied')) return false;
-
-    const sensor = new AbsoluteOrientationSensor({ frequency: 20, referenceFrame: 'screen' });
-    sensor.addEventListener('reading', () => {
-      const [x, y, z, w] = sensor.quaternion;
-      let h = Math.atan2(2*(w*z + x*y), 1 - 2*(y*y + z*z)) * 180 / Math.PI;
-      h = (360 - ((h + 360) % 360)) % 360;
-      onAbsolute(h, 'AbsoluteOrientationSensor');
-      eventCount++;
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal:'environment' } }, audio: false
     });
-    sensor.addEventListener('error', e => {
-      method = 'sensor error: ' + e.error?.name;
-    });
-    sensor.start();
-    return true;
+    document.getElementById('vid').srcObject = stream;
   } catch(e) {
-    return false;
+    document.getElementById('status').textContent = 'Camera denied — continuing without it';
   }
+
+  // 2. Motion — THIS must happen synchronously inside the tap handler
+  if (typeof DeviceOrientationEvent?.requestPermission === 'function') {
+    try {
+      const result = await DeviceOrientationEvent.requestPermission();
+      document.getElementById('status').textContent = 'Motion permission: ' + result;
+      if (result === 'granted') {
+        window.addEventListener('deviceorientation', onOrientation, true);
+      } else {
+        document.getElementById('status').textContent = 'Motion denied — check Settings > Safari > Motion';
+        return; // stay on permission screen
+      }
+    } catch(e) {
+      document.getElementById('status').textContent = 'Error: ' + e.message;
+      return;
+    }
+  } else {
+    // Non-iOS: just attach directly
+    window.addEventListener('deviceorientationabsolute', onOrientation, true);
+    window.addEventListener('deviceorientation',         onOrientation, true);
+  }
+
+  // 3. GPS
+  if (navigator.geolocation) {
+    navigator.geolocation.watchPosition(
+      p => { userLat = p.coords.latitude; userLng = p.coords.longitude; },
+      null, { enableHighAccuracy: true }
+    );
+  }
+
+  // 4. Launch AR
+  document.getElementById('p1').classList.add('hidden');
+  draw();
 }
 
-// ── Draw ──
+// ── Draw loop ──
 function draw() {
   const W = canvas.width, H = canvas.height;
   ctx.clearRect(0, 0, W, H);
-  const hdg = getHeading();
   const FOV = 70;
 
-  if (hdg !== null) {
+  if (compass !== null) {
     for (const p of PLACES) {
       const brg = bearing(userLat, userLng, p.lat, p.lng);
       const d   = dist(userLat, userLng, p.lat, p.lng);
-      let diff  = brg - hdg;
+      let diff  = brg - compass;
       if (diff >  180) diff -= 360;
       if (diff < -180) diff += 360;
       if (Math.abs(diff) > FOV / 2) continue;
@@ -190,18 +143,22 @@ function draw() {
       const x = W * (0.5 + diff / FOV);
       const y = H * 0.42;
 
+      // Glow ring
       ctx.globalAlpha = 0.25;
       ctx.beginPath(); ctx.arc(x, y, 38, 0, Math.PI*2);
       ctx.strokeStyle = p.color; ctx.lineWidth = 2; ctx.stroke();
 
+      // Dot
       ctx.globalAlpha = 0.9;
       ctx.beginPath(); ctx.arc(x, y, 14, 0, Math.PI*2);
       ctx.fillStyle = p.color; ctx.fill();
 
+      // Label background
       ctx.globalAlpha = 0.85;
       ctx.fillStyle = 'rgba(0,0,0,0.65)';
       ctx.beginPath(); ctx.roundRect(x-62, y+22, 124, 38, 6); ctx.fill();
 
+      // Label text
       ctx.globalAlpha = 1; ctx.textAlign = 'center';
       ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = '#fff';
       ctx.fillText(p.name, x, y+37);
@@ -210,70 +167,31 @@ function draw() {
     }
   }
 
+  // Crosshair
   ctx.globalAlpha = 0.4; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1;
   ctx.beginPath(); ctx.moveTo(W/2,H/2-18); ctx.lineTo(W/2,H/2+18); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(W/2-18,H/2); ctx.lineTo(W/2+18,H/2); ctx.stroke();
   ctx.globalAlpha = 1;
 
-  const h = hdg != null ? Math.round(hdg)+'°' : 'none';
-  const r = rawAlpha != null ? Math.round(rawAlpha)+'°' : 'waiting';
   document.getElementById('debug').textContent =
-    `method:${method} | events:${eventCount} | hdg:${h} | raw:${r} | ${userLat.toFixed(4)},${userLng.toFixed(4)}`;
+    `compass: ${compass !== null ? Math.round(compass)+'°' : 'waiting'} | events: ${eventCount} | gps: ${userLat.toFixed(4)},${userLng.toFixed(4)}`;
 
   requestAnimationFrame(draw);
 }
 
-function bearing(lat1,lon1,lat2,lon2) {
-  const R=Math.PI/180, dL=(lon2-lon1)*R;
-  const y=Math.sin(dL)*Math.cos(lat2*R);
-  const x=Math.cos(lat1*R)*Math.sin(lat2*R)-Math.sin(lat1*R)*Math.cos(lat2*R)*Math.cos(dL);
+function bearing(la1,lo1,la2,lo2) {
+  const R=Math.PI/180, dL=(lo2-lo1)*R;
+  const y=Math.sin(dL)*Math.cos(la2*R);
+  const x=Math.cos(la1*R)*Math.sin(la2*R)-Math.sin(la1*R)*Math.cos(la2*R)*Math.cos(dL);
   return (Math.atan2(y,x)*180/Math.PI+360)%360;
 }
-function dist(lat1,lon1,lat2,lon2) {
+function dist(la1,lo1,la2,lo2) {
   const R=6371000,r=Math.PI/180;
-  const dφ=(lat2-lat1)*r, dλ=(lon2-lon1)*r;
-  const a=Math.sin(dφ/2)**2+Math.cos(lat1*r)*Math.cos(lat2*r)*Math.sin(dλ/2)**2;
+  const dφ=(la2-la1)*r, dλ=(lo2-lo1)*r;
+  const a=Math.sin(dφ/2)**2+Math.cos(la1*r)*Math.cos(la2*r)*Math.sin(dλ/2)**2;
   return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
 }
 function fmtDist(m) { return m<1000?Math.round(m)+'m':(m/1000).toFixed(1)+'km'; }
-
-function initGPS() {
-  if (!navigator.geolocation) return;
-  navigator.geolocation.watchPosition(
-    p => { userLat=p.coords.latitude; userLng=p.coords.longitude; },
-    null, { enableHighAccuracy:true }
-  );
-}
-
-async function startAR() {
-  document.getElementById('p1').classList.add('hidden');
-
-  // Camera
-  try {
-    const s = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ideal:'environment'} }, audio:false });
-    document.getElementById('vid').srcObject = s;
-  } catch(e) {}
-
-  // iOS 13+ motion permission
-  if (typeof DeviceOrientationEvent?.requestPermission === 'function') {
-    try {
-      const s = await DeviceOrientationEvent.requestPermission();
-      if (s === 'granted') { attachListeners(); method = 'iOS perm granted'; }
-      else method = 'iOS perm denied';
-    } catch(e) { method = 'iOS perm error'; }
-  } else {
-    // Try new Sensor API first, fall back to events
-    const got = await tryNewSensorAPI();
-    if (!got) { attachListeners(); method = 'event listeners attached'; }
-  }
-
-  initGPS();
-
-  // Show calibration screen after 1.5s if no absolute heading yet
-  setTimeout(() => { if (!calibrated) showCalib(); }, 1500);
-
-  draw();
-}
 </script>
 </body>
 </html>
