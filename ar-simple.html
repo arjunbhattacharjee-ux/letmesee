@@ -8,48 +8,66 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #000; overflow: hidden; font-family: sans-serif; }
 
-#startBtn {
-  position: fixed; inset: 0;
+video { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
+canvas { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 1; }
+
+#overlay {
+  position: fixed; inset: 0; z-index: 5;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  background: #000; color: #fff; gap: 16px; z-index: 10;
+  background: rgba(0,0,0,0.92); color: #fff; gap: 16px; padding: 32px; text-align: center;
 }
-#startBtn button {
-  padding: 14px 32px; font-size: 16px; background: #fff; color: #000;
-  border: none; border-radius: 8px; cursor: pointer;
-}
-#startBtn p { font-size: 12px; color: #888; max-width: 280px; text-align: center; }
-
-video {
-  position: fixed; inset: 0; width: 100%; height: 100%;
-  object-fit: cover; z-index: 0;
+#overlay h2 { font-size: 20px; }
+#overlay p  { font-size: 13px; color: #aaa; line-height: 1.7; max-width: 280px; }
+#overlay button {
+  padding: 14px 32px; font-size: 15px; background: #fff; color: #000;
+  border: none; border-radius: 8px; cursor: pointer; width: 100%; max-width: 280px;
 }
 
-canvas {
-  position: fixed; inset: 0; width: 100%; height: 100%; z-index: 1;
+#calibBanner {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 4;
+  background: rgba(255,170,0,0.95); color: #000;
+  padding: 14px 16px; text-align: center;
+  font-size: 13px; font-weight: bold; line-height: 1.6;
+  display: none;
+}
+#calibBanner button {
+  margin-top: 8px; padding: 10px 24px; font-size: 14px; font-weight: bold;
+  background: #000; color: #fff; border: none; border-radius: 6px; cursor: pointer;
+}
+
+#recalib {
+  position: fixed; bottom: 60px; right: 12px; z-index: 4;
+  background: rgba(255,255,255,0.15); color: #fff;
+  border: 1px solid rgba(255,255,255,0.3); border-radius: 6px;
+  padding: 8px 12px; font-size: 11px; cursor: pointer; display: none;
 }
 
 #debug {
-  position: fixed; bottom: 10px; left: 10px; right: 10px;
-  font-size: 11px; color: rgba(255,255,255,0.7);
-  background: rgba(0,0,0,0.5); padding: 8px; border-radius: 6px;
-  z-index: 2; line-height: 1.8;
+  position: fixed; bottom: 10px; left: 10px; right: 10px; z-index: 3;
+  font-size: 11px; color: rgba(255,255,255,0.75);
+  background: rgba(0,0,0,0.55); padding: 8px 10px; border-radius: 6px; line-height: 1.8;
 }
 </style>
 </head>
 <body>
 
-<div id="startBtn">
-  <h2 style="font-size:20px">AR Locator</h2>
-  <p>Points camera at your surroundings — highlights 5 nearby locations</p>
-  <button onclick="start()">Start Camera</button>
+<div id="overlay">
+  <h2>AR Locator</h2>
+  <p>Shows 5 nearby locations on your camera.<br><br>After starting, point your phone toward <strong style="color:#fff">North</strong> and tap the calibration button.</p>
+  <button onclick="startAR()">Start Camera</button>
+</div>
+
+<div id="calibBanner">
+  🧭 Point your phone toward <strong>North</strong>, then tap:<br>
+  <button onclick="calibrate()">I'm pointing North ✓</button>
 </div>
 
 <video id="vid" autoplay playsinline muted></video>
 <canvas id="cv"></canvas>
-<div id="debug">Starting...</div>
+<button id="recalib" onclick="recalibrate()">🧭 Recalibrate</button>
+<div id="debug">Starting…</div>
 
 <script>
-// ── 5 hardcoded places (change to real coords near you) ──
 const PLACES = [
   { name: 'Burj Khalifa',    lat: 25.197197, lng: 55.274376, color: '#ff4444' },
   { name: 'Dubai Mall',      lat: 25.198765, lng: 55.279503, color: '#44aaff' },
@@ -58,22 +76,43 @@ const PLACES = [
   { name: 'Emirates Towers', lat: 25.217345, lng: 55.282123, color: '#ff44ff' },
 ];
 
-let userLat = 25.2120, userLng = 55.2817;
-let heading = 0; // degrees, 0 = North
-let headingOk = false;
-
 const canvas = document.getElementById('cv');
-const ctx = canvas.getContext('2d');
+const ctx    = canvas.getContext('2d');
 
-// ── Resize canvas to match screen ──
-function resize() {
-  canvas.width  = window.innerWidth;
-  canvas.height = window.innerHeight;
-}
+let userLat    = 25.2120, userLng = 55.2817;
+let rawAlpha   = null;   // latest alpha from sensor
+let northAlpha = null;   // alpha when user pointed North
+let calibrated = false;
+let iosMode    = false;  // true if webkitCompassHeading works
+
+function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
 window.addEventListener('resize', resize);
 resize();
 
-// ── Bearing from user to a place (degrees, 0=N, clockwise) ──
+function getHeading() {
+  if (iosMode && window._iosHeading != null) return window._iosHeading;
+  if (!calibrated || rawAlpha == null) return null;
+  return ((rawAlpha - northAlpha) + 360) % 360;
+}
+
+function calibrate() {
+  if (rawAlpha == null) {
+    alert('No sensor data yet. Try rotating your phone first.');
+    return;
+  }
+  northAlpha = rawAlpha;
+  calibrated = true;
+  document.getElementById('calibBanner').style.display = 'none';
+  document.getElementById('recalib').style.display = 'block';
+}
+
+function recalibrate() {
+  calibrated = false;
+  northAlpha = null;
+  document.getElementById('calibBanner').style.display = 'block';
+  document.getElementById('recalib').style.display = 'none';
+}
+
 function bearing(lat1, lon1, lat2, lon2) {
   const R = Math.PI / 180;
   const dL = (lon2 - lon1) * R;
@@ -83,7 +122,6 @@ function bearing(lat1, lon1, lat2, lon2) {
   return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
 }
 
-// ── Distance in metres ──
 function dist(lat1, lon1, lat2, lon2) {
   const R = 6371000, r = Math.PI / 180;
   const dφ = (lat2 - lat1) * r, dλ = (lon2 - lon1) * r;
@@ -91,86 +129,115 @@ function dist(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
-// ── Draw one frame ──
+function fmtDist(m) {
+  return m < 1000 ? Math.round(m) + 'm' : (m/1000).toFixed(1) + 'km';
+}
+
 function draw() {
   const W = canvas.width, H = canvas.height;
   ctx.clearRect(0, 0, W, H);
 
-  // Camera FOV (horizontal) — typical phone ~70°
+  const heading = getHeading();
   const FOV = 70;
 
-  for (const p of PLACES) {
-    const brg = bearing(userLat, userLng, p.lat, p.lng);
-    const d   = dist(userLat, userLng, p.lat, p.lng);
+  if (heading !== null) {
+    for (const p of PLACES) {
+      const brg = bearing(userLat, userLng, p.lat, p.lng);
+      const d   = dist(userLat, userLng, p.lat, p.lng);
 
-    // Angular offset from where we're pointing
-    let diff = brg - heading;
-    if (diff >  180) diff -= 360;
-    if (diff < -180) diff += 360;
+      let diff = brg - heading;
+      if (diff >  180) diff -= 360;
+      if (diff < -180) diff += 360;
 
-    // Skip if outside FOV
-    if (Math.abs(diff) > FOV / 2) continue;
+      if (Math.abs(diff) > FOV / 2) continue;
 
-    // Map diff to screen X  (-FOV/2 = left edge, +FOV/2 = right edge)
-    const x = W * (0.5 + diff / FOV);
-    // Y fixed at 40% from top
-    const y = H * 0.40;
+      const x = W * (0.5 + diff / FOV);
+      const y = H * 0.42;
 
-    const label = d < 1000
-      ? `${p.name}\n${Math.round(d)}m`
-      : `${p.name}\n${(d/1000).toFixed(1)}km`;
+      // Outer ring
+      ctx.beginPath();
+      ctx.arc(x, y, 38, 0, Math.PI * 2);
+      ctx.strokeStyle = p.color;
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.25;
+      ctx.stroke();
 
-    // Outer glow ring
-    ctx.beginPath();
-    ctx.arc(x, y, 36, 0, Math.PI * 2);
-    ctx.strokeStyle = p.color;
-    ctx.lineWidth = 2;
-    ctx.globalAlpha = 0.3;
-    ctx.stroke();
+      // Dot
+      ctx.beginPath();
+      ctx.arc(x, y, 14, 0, Math.PI * 2);
+      ctx.fillStyle = p.color;
+      ctx.globalAlpha = 0.9;
+      ctx.fill();
 
-    // Inner filled dot
-    ctx.beginPath();
-    ctx.arc(x, y, 14, 0, Math.PI * 2);
-    ctx.fillStyle = p.color;
-    ctx.globalAlpha = 0.85;
-    ctx.fill();
+      // Label background
+      ctx.globalAlpha = 0.82;
+      ctx.fillStyle = 'rgba(0,0,0,0.65)';
+      ctx.beginPath();
+      ctx.roundRect(x - 62, y + 22, 124, 38, 6);
+      ctx.fill();
 
-    // Label background
-    const lines = label.split('\n');
-    ctx.globalAlpha = 0.8;
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    ctx.beginPath();
-    ctx.roundRect(x - 60, y + 22, 120, 38, 6);
-    ctx.fill();
-
-    // Label text
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = '#ffffff';
-    ctx.textAlign = 'center';
-    ctx.font = 'bold 12px sans-serif';
-    ctx.fillText(lines[0], x, y + 37);
-    ctx.font = '11px sans-serif';
-    ctx.fillStyle = p.color;
-    ctx.fillText(lines[1], x, y + 52);
+      // Label text
+      ctx.globalAlpha = 1;
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 12px sans-serif';
+      ctx.fillStyle = '#fff';
+      ctx.fillText(p.name, x, y + 37);
+      ctx.font = '11px sans-serif';
+      ctx.fillStyle = p.color;
+      ctx.fillText(fmtDist(d), x, y + 52);
+    }
   }
 
+  // Crosshair
+  ctx.globalAlpha = 0.45;
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(W/2, H/2-18); ctx.lineTo(W/2, H/2+18); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(W/2-18, H/2); ctx.lineTo(W/2+18, H/2); ctx.stroke();
   ctx.globalAlpha = 1;
 
-  // Centre crosshair
-  ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-  ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(W/2, H/2 - 16); ctx.lineTo(W/2, H/2 + 16); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(W/2 - 16, H/2); ctx.lineTo(W/2 + 16, H/2); ctx.stroke();
-
-  // Debug info
+  // Debug
+  const hdg = heading != null ? Math.round(heading) + '°' : (calibrated ? '?' : 'tap North to calibrate');
+  const raw = rawAlpha != null ? Math.round(rawAlpha) + '°' : 'waiting for sensor…';
   document.getElementById('debug').textContent =
-    `Heading: ${Math.round(heading)}°  ${headingOk ? '✓ compass' : '⚠ no compass — point N to calibrate'} | ` +
-    `GPS: ${userLat.toFixed(4)}, ${userLng.toFixed(4)}`;
+    `Heading: ${hdg}  |  Raw α: ${raw}  |  GPS: ${userLat.toFixed(4)}, ${userLng.toFixed(4)}`;
 
   requestAnimationFrame(draw);
 }
 
-// ── GPS ──
+function attachOrientation() {
+  const handle = e => {
+    // iOS real compass
+    if (typeof e.webkitCompassHeading === 'number' && e.webkitCompassHeading >= 0) {
+      iosMode = true;
+      calibrated = true;
+      window._iosHeading = e.webkitCompassHeading;
+      document.getElementById('calibBanner').style.display = 'none';
+      document.getElementById('recalib').style.display = 'none';
+      return;
+    }
+    // Absolute alpha (Android with absolute event)
+    if (e.absolute === true && e.alpha != null) {
+      rawAlpha = (360 - e.alpha) % 360;
+      northAlpha = 0;
+      calibrated = true;
+      document.getElementById('calibBanner').style.display = 'none';
+      document.getElementById('recalib').style.display = 'block';
+      return;
+    }
+    // Relative alpha — needs calibration
+    if (e.alpha != null) {
+      rawAlpha = e.alpha;
+      if (!calibrated) {
+        document.getElementById('calibBanner').style.display = 'block';
+      }
+    }
+  };
+
+  window.addEventListener('deviceorientationabsolute', handle, true);
+  window.addEventListener('deviceorientation', handle, true);
+}
+
 function initGPS() {
   if (!navigator.geolocation) return;
   navigator.geolocation.watchPosition(pos => {
@@ -179,58 +246,26 @@ function initGPS() {
   }, null, { enableHighAccuracy: true });
 }
 
-// ── Orientation / compass ──
-function initOrientation() {
-  const handle = e => {
-    let h = null;
-    if (typeof e.webkitCompassHeading === 'number' && e.webkitCompassHeading >= 0) {
-      // iOS — already true north, clockwise
-      h = e.webkitCompassHeading;
-    } else if (e.alpha != null && (e.absolute || e.type === 'deviceorientationabsolute')) {
-      // Android absolute
-      h = (360 - e.alpha) % 360;
-    }
-    if (h == null) return;
-    headingOk = true;
-    heading = h;
-  };
+async function startAR() {
+  document.getElementById('overlay').style.display = 'none';
 
-  if (typeof DeviceOrientationEvent !== 'undefined' &&
-      typeof DeviceOrientationEvent.requestPermission === 'function') {
-    // iOS 13+ — needs button tap (already inside start())
-    window._orientHandle = handle;
-  } else {
-    window.addEventListener('deviceorientationabsolute', handle, true);
-    window.addEventListener('deviceorientation', handle, true);
-  }
-}
-
-// ── Start everything ──
-async function start() {
-  document.getElementById('startBtn').style.display = 'none';
-
-  // Camera
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: { ideal: 'environment' } }, audio: false
     });
     document.getElementById('vid').srcObject = stream;
-  } catch(e) {
-    document.getElementById('debug').textContent = 'Camera denied — using black bg';
-  }
+  } catch(e) {}
 
-  // iOS compass permission
   if (typeof DeviceOrientationEvent?.requestPermission === 'function') {
     try {
       const s = await DeviceOrientationEvent.requestPermission();
-      if (s === 'granted' && window._orientHandle) {
-        window.addEventListener('deviceorientation', window._orientHandle, true);
-      }
+      if (s === 'granted') attachOrientation();
     } catch(e) {}
+  } else {
+    attachOrientation();
   }
 
   initGPS();
-  initOrientation();
   draw();
 }
 </script>
