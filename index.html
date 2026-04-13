@@ -11,7 +11,7 @@ video  { position:fixed; inset:0; width:100%; height:100%; object-fit:cover; z-i
 canvas { position:fixed; inset:0; width:100%; height:100%; z-index:1; pointer-events:none; }
 
 #p1 {
-  position:fixed; inset:0; z-index:10; background:rgba(0,0,0,0.92);
+  position:fixed; inset:0; z-index:10; background:#000;
   display:flex; flex-direction:column; align-items:center; justify-content:center;
   gap:24px; padding:40px 28px; text-align:center;
 }
@@ -23,7 +23,9 @@ canvas { position:fixed; inset:0; width:100%; height:100%; z-index:1; pointer-ev
   font-size:18px; font-weight:bold;
   background:#fff; color:#000;
   border:none; border-radius:12px; cursor:pointer;
+  transition: opacity .2s;
 }
+#startBtn:disabled { opacity:.4; }
 
 #loading {
   position:fixed; inset:0; z-index:9; background:rgba(0,0,0,0.75);
@@ -74,6 +76,16 @@ canvas { position:fixed; inset:0; width:100%; height:100%; z-index:1; pointer-ev
   backdrop-filter:blur(6px);
 }
 
+/* Demo mode banner */
+#demobanner {
+  position:fixed; top:52px; left:50%; transform:translateX(-50%);
+  z-index:6; background:rgba(255,170,0,0.15);
+  border:1px solid rgba(255,170,0,0.4); border-radius:8px;
+  padding:6px 14px; font-size:11px; color:#ffaa00;
+  display:none; white-space:nowrap; backdrop-filter:blur(6px);
+}
+#demobanner.on { display:block; }
+
 #debug {
   position:fixed; bottom:8px; left:8px; right:8px; z-index:4;
   font-size:10px; color:rgba(255,255,255,0.65);
@@ -98,7 +110,7 @@ canvas { position:fixed; inset:0; width:100%; height:100%; z-index:1; pointer-ev
   <h2>📍 AR Locator</h2>
   <p>Live nearby places from OpenStreetMap.<br>Point your camera and see what's around you.</p>
   <button id="startBtn" onclick="startAR()">Enable &amp; Start</button>
-  <p id="msg" style="font-size:12px;color:#666;min-height:18px"></p>
+  <p id="msg" style="font-size:12px;color:#f80;min-height:18px;line-height:1.5"></p>
 </div>
 
 <div id="loading"><div class="spinner"></div><span id="loadmsg">Loading…</span></div>
@@ -108,6 +120,7 @@ canvas { position:fixed; inset:0; width:100%; height:100%; z-index:1; pointer-ev
 
 <button id="rescan" onclick="fetchPlaces()">⟳ Rescan</button>
 <div id="rangebadge"></div>
+<div id="demobanner">⚠ Demo mode — simulated GPS &amp; compass</div>
 <div id="filters"></div>
 <div id="debug">Tap Start to begin</div>
 
@@ -162,11 +175,38 @@ const canvas = document.getElementById('cv');
 const ctx    = canvas.getContext('2d');
 let userLat=null, userLng=null, compass=null, eventCount=0;
 let allPlaces=[], activeFilter='all';
+let demoMode = false;
+let demoTimer = null;
 
-const FOV       = 100;   // horizontal field of view in degrees
-const FETCH_R   = 1000;  // fetch radius metres
-const MAX_PINS  = 100;   // max pins to fetch
-const OVERLAP   = 68;    // pixel distance to trigger icon-only
+const FOV      = 100;
+const FETCH_R  = 1000;
+const MAX_PINS = 100;
+const OVERLAP  = 68;
+
+// ── Demo mode: simulated GPS + slowly rotating compass ───────────────────
+// Uses Dubai Downtown as demo location
+const DEMO_LAT = 25.1972, DEMO_LNG = 55.2796;
+
+function startDemoMode() {
+  demoMode = true;
+  document.getElementById('demobanner').classList.add('on');
+  userLat = DEMO_LAT;
+  userLng = DEMO_LNG;
+  compass = 0;
+  // Slowly rotate compass so pins move across screen
+  demoTimer = setInterval(() => { compass = (compass + 0.4) % 360; }, 50);
+  fetchPlaces();
+}
+
+function stopDemoMode() {
+  demoMode = false;
+  document.getElementById('demobanner').classList.remove('on');
+  if (demoTimer) { clearInterval(demoTimer); demoTimer = null; }
+}
+
+function setMsg(txt) {
+  document.getElementById('msg').textContent = txt;
+}
 
 function resize() { canvas.width=window.innerWidth; canvas.height=window.innerHeight; }
 window.addEventListener('resize', resize);
@@ -227,15 +267,16 @@ async function fetchPlaces() {
     const badge = document.getElementById('rangebadge');
     badge.textContent = `📍 ${allPlaces.length} places · ${FETCH_R}m`;
     badge.style.display = 'block';
-    setTimeout(()=>document.getElementById('loading').classList.remove('on'), 500);
+    setTimeout(()=>document.getElementById('loading').classList.remove('on'), 600);
     document.getElementById('rescan').style.display = 'block';
   } catch(e) {
-    document.getElementById('loadmsg').textContent = 'Fetch failed — check connection';
-    setTimeout(()=>document.getElementById('loading').classList.remove('on'), 1500);
+    document.getElementById('loadmsg').textContent = 'Network error — retrying…';
+    setTimeout(()=>{ document.getElementById('loading').classList.remove('on'); }, 2000);
   }
 }
 
 function onOrientation(e) {
+  if (demoMode) return; // ignore real events during demo
   eventCount++;
   if (typeof e.webkitCompassHeading==='number' && e.webkitCompassHeading>=0)
     compass = e.webkitCompassHeading;
@@ -245,49 +286,105 @@ function onOrientation(e) {
     compass = (360-e.alpha)%360;
 }
 
+// ── Main start function ───────────────────────────────────────────────────
 async function startAR() {
-  document.getElementById('msg').textContent = 'Starting…';
+  const btn = document.getElementById('startBtn');
+  btn.disabled = true;
+  setMsg('Starting…');
 
-  // Camera
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video:{ facingMode:{ ideal:'environment' }, width:{ ideal:1920 } }, audio:false
-    });
-    document.getElementById('vid').srcObject = stream;
-  } catch(e) {
-    document.getElementById('bg').classList.add('on');
-    document.getElementById('msg').textContent = '⚠ No camera — map-overlay mode';
-  }
-
-  // Motion
-  if (typeof DeviceOrientationEvent!=='undefined' &&
-      typeof DeviceOrientationEvent.requestPermission==='function') {
+  // ── 1. Camera ─────────────────────────────────────────────────────────
+  let cameraOk = false;
+  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
     try {
-      const r = await DeviceOrientationEvent.requestPermission();
-      if (r==='granted') window.addEventListener('deviceorientation', onOrientation, true);
-      else { document.getElementById('msg').textContent='⚠ Motion denied'; return; }
-    } catch(e) { return; }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video:{ facingMode:{ ideal:'environment' }, width:{ ideal:1920 } }, audio:false
+      });
+      document.getElementById('vid').srcObject = stream;
+      cameraOk = true;
+    } catch(e) {
+      document.getElementById('bg').classList.add('on');
+      setMsg('⚠ No camera — continuing without it');
+    }
   } else {
-    window.addEventListener('deviceorientationabsolute', onOrientation, true);
-    window.addEventListener('deviceorientation', onOrientation, true);
+    document.getElementById('bg').classList.add('on');
   }
 
-  document.getElementById('loading').classList.add('on');
-  document.getElementById('loadmsg').textContent = 'Getting GPS…';
+  // ── 2. Motion / compass ───────────────────────────────────────────────
+  let compassOk = false;
+  if (typeof DeviceOrientationEvent !== 'undefined') {
+    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+      // iOS 13+ — must request
+      try {
+        const r = await DeviceOrientationEvent.requestPermission();
+        if (r === 'granted') {
+          window.addEventListener('deviceorientation', onOrientation, true);
+          compassOk = true;
+        } else {
+          setMsg('⚠ Motion permission denied');
+        }
+      } catch(e) {
+        setMsg('⚠ Could not request motion: ' + e.message);
+      }
+    } else {
+      // Android / desktop — just listen
+      window.addEventListener('deviceorientationabsolute', onOrientation, true);
+      window.addEventListener('deviceorientation', onOrientation, true);
+      compassOk = true;
+    }
+  }
 
-  navigator.geolocation.watchPosition(pos => {
-    const first = !userLat;
-    userLat = pos.coords.latitude;
-    userLng = pos.coords.longitude;
-    if (first) fetchPlaces();
-  }, null, { enableHighAccuracy:true });
+  // ── 3. GPS ────────────────────────────────────────────────────────────
+  let gpsOk = false;
+  if (navigator.geolocation) {
+    // Race GPS against a 6-second timeout
+    await new Promise(resolve => {
+      document.getElementById('loading').classList.add('on');
+      document.getElementById('loadmsg').textContent = 'Getting GPS…';
 
+      const timer = setTimeout(() => {
+        resolve(); // timed out — fall through to demo
+      }, 6000);
+
+      navigator.geolocation.watchPosition(
+        pos => {
+          clearTimeout(timer);
+          const first = !userLat;
+          userLat = pos.coords.latitude;
+          userLng = pos.coords.longitude;
+          gpsOk = true;
+          if (first) { fetchPlaces(); resolve(); }
+        },
+        err => {
+          clearTimeout(timer);
+          setMsg('⚠ GPS unavailable: ' + err.message);
+          resolve();
+        },
+        { enableHighAccuracy:true, timeout:8000 }
+      );
+    });
+  }
+
+  // ── 4. Check what we got; fall back to demo if needed ─────────────────
+  document.getElementById('loading').classList.remove('on');
+
+  const needsDemo = !gpsOk || !compassOk;
+  if (needsDemo) {
+    if (!gpsOk && !compassOk)
+      setMsg('No GPS or compass — running demo mode (Dubai)');
+    else if (!gpsOk)
+      setMsg('No GPS — running demo mode (Dubai)');
+    else
+      setMsg('No compass — running demo mode');
+    startDemoMode();
+  }
+
+  // ── 5. Always show the AR view ─────────────────────────────────────────
   document.getElementById('p1').classList.add('hidden');
   buildFilters();
   draw();
 }
 
-// ── Overlap: returns set of indices that should be icon-only ──────────────
+// ── Overlap detection ─────────────────────────────────────────────────────
 function computeIconOnly(pins) {
   const slim = new Set();
   for (let i=0; i<pins.length; i++) {
@@ -321,17 +418,14 @@ function draw() {
       if (Math.abs(diff)>FOV/2) continue;
 
       const x = W*(0.5+diff/FOV);
-      // Far = high on screen (y small), near = low (y large)
       const t = Math.min(1, Math.max(0, (d-20)/(FETCH_R-20)));
-      // Vertical spread: bottom 82% down to top 18%
       const y = H*(0.82 - 0.64*t);
-
       pins.push({p, x, y, d, color:p.color});
     }
 
     const slim = computeIconOnly(pins);
 
-    // Pass 2 — draw (sorted so far pins render under near pins)
+    // Pass 2 — draw far-to-near so near pins render on top
     const sorted = [...pins].sort((a,b)=>b.d-a.d);
     for (let si=0; si<sorted.length; si++) {
       const orig = pins.indexOf(sorted[si]);
@@ -339,7 +433,7 @@ function draw() {
       const isSlim = slim.has(orig);
 
       if (isSlim) {
-        // ── Compact icon-only pin ──
+        // Compact icon-only
         ctx.globalAlpha=0.2;
         ctx.beginPath(); ctx.arc(x,y,20,0,Math.PI*2);
         ctx.strokeStyle=color; ctx.lineWidth=1.5; ctx.stroke();
@@ -352,7 +446,6 @@ function draw() {
         ctx.font='10px sans-serif'; ctx.textAlign='center';
         ctx.fillText(p.icon, x, y+4);
 
-        // Tiny dist tag
         ctx.globalAlpha=0.75;
         ctx.fillStyle='rgba(0,0,0,0.7)';
         ctx.beginPath(); ctx.roundRect(x-17,y+14,34,14,4); ctx.fill();
@@ -361,8 +454,7 @@ function draw() {
         ctx.fillText(fmtDist(d), x, y+23);
 
       } else {
-        // ── Full labelled pin ──
-        // Outer pulse ring
+        // Full labelled pin
         ctx.globalAlpha=0.1;
         ctx.beginPath(); ctx.arc(x,y,42,0,Math.PI*2);
         ctx.strokeStyle=color; ctx.lineWidth=2; ctx.stroke();
@@ -371,28 +463,23 @@ function draw() {
         ctx.beginPath(); ctx.arc(x,y,25,0,Math.PI*2);
         ctx.strokeStyle=color; ctx.lineWidth=1.5; ctx.stroke();
 
-        // Dot
         ctx.globalAlpha=1;
         ctx.beginPath(); ctx.arc(x,y,15,0,Math.PI*2);
         ctx.fillStyle=color; ctx.fill();
 
-        // Icon on dot
         ctx.font='13px sans-serif'; ctx.textAlign='center'; ctx.fillStyle='rgba(0,0,0,0.85)';
         ctx.fillText(p.icon, x, y+5);
 
-        // Pill label
         const label = p.name.length>20 ? p.name.slice(0,18)+'…' : p.name;
         const pillW = Math.max(108, label.length*7+26);
-        const pillH = 38;
-        const pillX = x-pillW/2, pillY = y+20;
+        const pillH = 38, pillX=x-pillW/2, pillY=y+20;
 
         ctx.globalAlpha=0.9;
         ctx.fillStyle='rgba(0,0,0,0.82)';
-        ctx.beginPath(); ctx.roundRect(pillX, pillY, pillW, pillH, 8); ctx.fill();
+        ctx.beginPath(); ctx.roundRect(pillX,pillY,pillW,pillH,8); ctx.fill();
 
-        // Left color bar
         ctx.fillStyle=color; ctx.globalAlpha=0.8;
-        ctx.beginPath(); ctx.roundRect(pillX, pillY, 3, pillH, [8,0,0,8]); ctx.fill();
+        ctx.beginPath(); ctx.roundRect(pillX,pillY,3,pillH,[8,0,0,8]); ctx.fill();
 
         ctx.globalAlpha=1; ctx.textAlign='center';
         ctx.font='bold 11px sans-serif'; ctx.fillStyle='#fff';
@@ -401,6 +488,14 @@ function draw() {
         ctx.fillText(fmtDist(d), x+1, pillY+28);
       }
     }
+  } else if (userLat && compass===null) {
+    // Compass waiting message
+    ctx.globalAlpha=0.5; ctx.textAlign='center';
+    ctx.font='14px sans-serif'; ctx.fillStyle='#fff';
+    ctx.fillText('Waiting for compass…', W/2, H/2);
+    ctx.font='12px sans-serif'; ctx.fillStyle='#888';
+    ctx.fillText('Try tilting your phone', W/2, H/2+24);
+    ctx.globalAlpha=1;
   }
 
   // ── Compass strip ──
@@ -430,16 +525,11 @@ function draw() {
       ctx.strokeStyle='#fff'; ctx.lineWidth=1;
       ctx.beginPath(); ctx.moveTo(x,34); ctx.lineTo(x,40); ctx.stroke();
     }
-
-    // Heading readout centred
     ctx.globalAlpha=1;
     ctx.font='bold 10px monospace'; ctx.textAlign='center'; ctx.fillStyle='rgba(255,255,255,0.9)';
     ctx.fillText(Math.round(compass)+'°', W/2, 28);
-
-    // Centre tick
     ctx.strokeStyle='rgba(255,255,255,0.6)'; ctx.lineWidth=1.5;
     ctx.beginPath(); ctx.moveTo(W/2,40); ctx.lineTo(W/2,46); ctx.stroke();
-    ctx.globalAlpha=1;
   }
 
   // ── Crosshair ──
@@ -448,10 +538,10 @@ function draw() {
   ctx.beginPath(); ctx.moveTo(W/2-15,H/2); ctx.lineTo(W/2+15,H/2); ctx.stroke();
   ctx.globalAlpha=1;
 
-  // Debug
+  // ── Debug ──
   const gps = userLat?`${userLat.toFixed(4)},${userLng.toFixed(4)}`:'waiting…';
   document.getElementById('debug').textContent =
-    `hdg:${compass!==null?Math.round(compass)+'°':'—'}  ·  events:${eventCount}  ·  pins:${visiblePlaces().length}/${allPlaces.length}  ·  gps:${gps}`;
+    `${demoMode?'[DEMO] ':''}hdg:${compass!==null?Math.round(compass)+'°':'—'}  ·  events:${eventCount}  ·  pins:${visiblePlaces().length}/${allPlaces.length}  ·  gps:${gps}`;
 
   requestAnimationFrame(draw);
 }
