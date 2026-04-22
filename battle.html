@@ -43,6 +43,7 @@
     <button class="filter-btn" data-war="napoleonic" style="">Napoleonic</button>
     <button class="filter-btn" data-war="ancient" style="">Ancient</button>
     <button class="filter-btn" data-war="medieval" style="">Medieval</button>
+    <button class="filter-btn" data-war="indian" style="">Indian</button>
     <div class="layer-toggle">
       <button class="layer-btn active" id="btn-street">Map</button>
       <button class="layer-btn" id="btn-terrain">Terrain</button>
@@ -52,7 +53,7 @@
   <div id="main">
     <div id="map"></div>
     <div id="sidebar">
-      <div class="sidebar-header" id="sidebar-count">16 battles</div>
+      <div class="sidebar-header" id="sidebar-count">22 battles</div>
       <div id="battle-list"></div>
     </div>
   </div>
@@ -66,7 +67,8 @@ const wars = {
   ww2:        { label: "World War II",     color: "#F7C1C1", text: "#791F1F", badge: "#A32D2D", btn: "#A32D2D" },
   napoleonic: { label: "Napoleonic Wars",  color: "#FAC775", text: "#633806", badge: "#BA7517", btn: "#BA7517" },
   ancient:    { label: "Ancient World",    color: "#C0DD97", text: "#27500A", badge: "#3B6D11", btn: "#3B6D11" },
-  medieval:   { label: "Medieval",         color: "#CECBF6", text: "#3C3489", badge: "#534AB7", btn: "#534AB7" }
+  medieval:   { label: "Medieval",         color: "#CECBF6", text: "#3C3489", badge: "#534AB7", btn: "#534AB7" },
+  indian:     { label: "Indian History",   color: "#FDDCB5", text: "#7A3300", badge: "#C45C00", btn: "#C45C00" }
 };
 
 const battles = [
@@ -85,6 +87,13 @@ const battles = [
   { id:13, war:"ancient",    name:"Battle of Gaugamela",   date:"Oct 1, 331 BC",    location:"Iraq",          lat:36.50, lng:43.10,   victor:"Macedon",            casualties:"~50,000 Persian",   desc:"Alexander the Great's decisive victory over Darius III, ending the Achaemenid Persian Empire and opening the path to his eastern conquests.", sides:"Macedon vs Persia" },
   { id:14, war:"medieval",   name:"Battle of Hastings",    date:"Oct 14, 1066",     location:"England",       lat:50.91, lng:0.49,    victor:"Normans",            casualties:"~10,000+",          desc:"William the Conqueror defeated King Harold II, fundamentally changing English history and culture through the Norman conquest.", sides:"Normans vs Anglo-Saxons" },
   { id:15, war:"medieval",   name:"Battle of Agincourt",   date:"Oct 25, 1415",     location:"France",        lat:50.46, lng:2.14,    victor:"England",            casualties:"6,000–11,000 French",desc:"Henry V's outnumbered English army devastated the French nobility. English longbowmen proved decisive against armored knights in muddy conditions.", sides:"England vs France" },
+
+  { id:17, war:"indian", name:"Battle of Panipat (First)",   date:"Apr 21, 1526",     location:"India",         lat:29.39, lng:76.97,   victor:"Mughals",            casualties:"~20,000",           desc:"Babur defeated Ibrahim Lodi using artillery and flanking tactics, founding the Mughal Empire that would rule the subcontinent for over three centuries.", sides:"Mughal Empire vs Lodi Sultanate" },
+  { id:18, war:"indian", name:"Battle of Haldighati",        date:"Jun 18, 1576",     location:"India",         lat:24.83, lng:73.68,   victor:"Mughal (tactical)",  casualties:"~17,000",           desc:"Maharana Pratap of Mewar fiercely resisted the Mughal Emperor Akbar's forces. Though outnumbered, Pratap became a symbol of Rajput valor and resistance.", sides:"Mewar (Rajputs) vs Mughal Empire" },
+  { id:19, war:"indian", name:"Battle of Plassey",           date:"Jun 23, 1757",     location:"India",         lat:23.80, lng:88.25,   victor:"British East India Co.", casualties:"~500 total",      desc:"Robert Clive's decisive victory over the Nawab of Bengal marked the beginning of British political dominance over India, made possible largely by betrayal.", sides:"British East India Co. vs Nawab of Bengal" },
+  { id:20, war:"indian", name:"Battle of Panipat (Third)",   date:"Jan 14, 1761",     location:"India",         lat:29.39, lng:76.97,   victor:"Afghan Durrani",     casualties:"~100,000+",         desc:"One of the largest battles of the 18th century. Ahmed Shah Durrani crushed the Maratha Confederacy, halting their expansion and reshaping the balance of power in India.", sides:"Afghan Durrani Empire vs Maratha Confederacy" },
+  { id:21, war:"indian", name:"Battle of Saragarhi",         date:"Sep 12, 1897",     location:"Pakistan",      lat:33.61, lng:70.95,   victor:"Afghan Tribes (pyrrhic)", casualties:"21 Sikhs, ~600 Afghan", desc:"21 Sikh soldiers of the 36th Sikhs held a signal post against over 10,000 Afghan tribesmen, fighting to the last man. Considered one of the greatest last stands in military history.", sides:"British Indian Army vs Afghan Orakzai Tribes" },
+  { id:22, war:"indian", name:"Battle of Talikota",          date:"Jan 23, 1565",     location:"India",         lat:16.47, lng:76.32,   victor:"Deccan Sultanates",  casualties:"~100,000+",         desc:"A coalition of Deccan Sultanates defeated the mighty Vijayanagara Empire, one of the largest Hindu kingdoms, bringing an end to its dominance over South India.", sides:"Vijayanagara Empire vs Deccan Sultanates" },
   { id:16, war:"medieval",   name:"Battle of Tours",       date:"Oct 732 AD",       location:"France",        lat:47.00, lng:0.70,    victor:"Franks",             casualties:"Unknown",           desc:"Charles Martel halted Umayyad expansion into Western Europe — many historians consider it one of the most decisive battles in shaping Christian European civilization.", sides:"Franks vs Umayyad Caliphate" },
 ];
 
@@ -144,14 +153,10 @@ function buildPopup(b) {
       <div class="popup-stat"><div class="popup-stat-label">Casualties</div><div class="popup-stat-val">${b.casualties}</div></div>
     </div>
     <div class="popup-sides"><div class="popup-stat-label">Combatants</div><div class="popup-stat-val" style="font-size:11px">${b.sides}</div></div>
-    <button class="popup-btn" style="background:${w.badge}" onclick="window._deepDive(${b.id})">Deep dive into this battle ↗</button>
   </div>`;
 }
 
-window._deepDive = function(id) {
-  const b = battles.find(x => x.id === id);
-  if (b) sendPrompt(`Tell me more about the ${b.name} (${b.date}) — its causes, key commanders, turning points, and lasting historical significance.`);
-};
+
 
 function renderMarkers(filter) {
   Object.values(markers).forEach(m => map.removeLayer(m));
