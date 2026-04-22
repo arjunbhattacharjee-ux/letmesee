@@ -1,61 +1,116 @@
-
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  #app { display: flex; flex-direction: column; height: 640px; font-family: var(--font-sans); }
-  #toolbar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 0.5px solid var(--color-border-tertiary); flex-wrap: wrap; background: var(--color-background-primary); z-index: 1000; }
-  #toolbar h2 { font-size: 15px; font-weight: 500; color: var(--color-text-primary); flex-shrink: 0; }
-  .filter-btn { font-size: 12px; padding: 4px 10px; border-radius: 20px; border: 0.5px solid var(--color-border-secondary); background: var(--color-background-primary); color: var(--color-text-secondary); cursor: pointer; transition: all 0.15s; }
-  .filter-btn.active { color: #E6F1FB; border-color: transparent; }
-  #main { display: flex; flex: 1; overflow: hidden; }
-  #map { flex: 1; z-index: 1; }
-  #sidebar { width: 250px; border-left: 0.5px solid var(--color-border-tertiary); overflow-y: auto; background: var(--color-background-primary); display: flex; flex-direction: column; }
-  .sidebar-header { padding: 8px 14px; font-size: 11px; font-weight: 500; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 0.5px solid var(--color-border-tertiary); flex-shrink: 0; }
-  .battle-card { padding: 10px 14px; border-bottom: 0.5px solid var(--color-border-tertiary); cursor: pointer; transition: background 0.12s; border-left: 3px solid transparent; }
-  .battle-card:hover { background: var(--color-background-secondary); }
-  .battle-card.selected { background: #E6F1FB; }
-  .card-war { font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
-  .card-name { font-size: 13px; font-weight: 500; color: var(--color-text-primary); }
-  .card-meta { font-size: 11px; color: var(--color-text-secondary); margin-top: 1px; }
-  .leaflet-popup-content-wrapper { border-radius: 10px !important; border: 0.5px solid #ddd; box-shadow: 0 4px 16px rgba(0,0,0,0.12) !important; padding: 0 !important; overflow: hidden; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  #app { display: flex; height: 640px; overflow: hidden; }
+
+  /* LEFT PANEL */
+  #panel { width: 220px; min-width: 220px; display: flex; flex-direction: column; background: #1a1a2e; color: #e0e0e0; overflow: hidden; }
+
+  #panel-header { padding: 14px 16px 10px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+  #panel-header h2 { font-size: 15px; font-weight: 600; color: #fff; letter-spacing: 0.3px; }
+  #panel-header p  { font-size: 11px; color: #888; margin-top: 2px; }
+
+  #panel-body { flex: 1; overflow-y: auto; }
+  #panel-body::-webkit-scrollbar { width: 4px; }
+  #panel-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+
+  .section-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: #666; padding: 12px 16px 6px; }
+
+  /* WAR FILTER BUTTONS */
+  .war-btn { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 16px; background: none; border: none; cursor: pointer; color: #bbb; font-size: 13px; text-align: left; transition: background 0.12s; border-left: 3px solid transparent; }
+  .war-btn:hover { background: rgba(255,255,255,0.06); color: #fff; }
+  .war-btn.active { color: #fff; background: rgba(255,255,255,0.08); }
+  .war-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+  /* MAP TOGGLE */
+  .map-toggle { display: flex; gap: 6px; padding: 10px 16px; }
+  .map-btn { flex: 1; padding: 5px 0; font-size: 11px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.15); background: transparent; color: #999; cursor: pointer; transition: all 0.15s; }
+  .map-btn.active { background: #185FA5; color: #fff; border-color: #185FA5; }
+
+  /* RULER CARDS */
+  .ruler-btn { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 16px; background: none; border: none; cursor: pointer; color: #bbb; font-size: 12px; text-align: left; transition: background 0.12s; border-left: 3px solid transparent; }
+  .ruler-btn:hover { background: rgba(255,255,255,0.06); color: #fff; }
+  .ruler-btn.active { color: #fff; background: rgba(255,255,255,0.08); border-left-color: #f0b429; }
+  .ruler-avatar { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; background: rgba(255,255,255,0.1); }
+  .ruler-info { display: flex; flex-direction: column; }
+  .ruler-name { font-size: 12px; font-weight: 500; color: inherit; line-height: 1.2; }
+  .ruler-sub  { font-size: 10px; color: #666; margin-top: 1px; }
+
+  /* BATTLE LIST */
+  .battle-item { display: flex; align-items: flex-start; gap: 8px; padding: 8px 16px; cursor: pointer; border-left: 3px solid transparent; transition: background 0.1s; }
+  .battle-item:hover { background: rgba(255,255,255,0.05); }
+  .battle-item.selected { background: rgba(255,255,255,0.09); }
+  .battle-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
+  .battle-info .b-name { font-size: 12px; color: #ddd; line-height: 1.3; }
+  .battle-info .b-meta { font-size: 10px; color: #666; margin-top: 1px; }
+
+  .divider { height: 1px; background: rgba(255,255,255,0.07); margin: 6px 0; }
+
+  /* MAP */
+  #map-wrap { flex: 1; position: relative; }
+  #map { width: 100%; height: 100%; }
+
+  /* POPUP */
+  .leaflet-popup-content-wrapper { border-radius: 10px !important; border: 0.5px solid #ddd; box-shadow: 0 4px 20px rgba(0,0,0,0.15) !important; padding: 0 !important; overflow: hidden; }
   .leaflet-popup-content { margin: 0 !important; width: 260px !important; }
   .popup-inner { padding: 14px; }
-  .popup-badge { display: inline-block; font-size: 10px; font-weight: 500; padding: 2px 8px; border-radius: 20px; margin-bottom: 6px; }
-  .popup-name { font-size: 15px; font-weight: 500; margin-bottom: 3px; color: #1a1a1a; }
+  .popup-badge { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 20px; margin-bottom: 6px; }
+  .popup-name { font-size: 15px; font-weight: 600; margin-bottom: 3px; color: #1a1a1a; }
   .popup-meta { font-size: 11px; color: #666; margin-bottom: 8px; }
   .popup-desc { font-size: 12px; color: #333; line-height: 1.5; margin-bottom: 10px; }
-  .popup-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+  .popup-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px; }
   .popup-stat { background: #f5f5f5; border-radius: 6px; padding: 6px 8px; }
   .popup-stat-label { font-size: 9px; color: #888; margin-bottom: 1px; text-transform: uppercase; letter-spacing: 0.3px; }
   .popup-stat-val { font-size: 12px; font-weight: 500; color: #222; }
-  .popup-sides { background: #f5f5f5; border-radius: 6px; padding: 6px 8px; margin-bottom: 10px; }
-  .popup-btn { display: block; width: 100%; padding: 7px; background: #185FA5; color: white; border: none; border-radius: 6px; font-size: 12px; cursor: pointer; text-align: center; }
-  .layer-toggle { display: flex; gap: 4px; margin-left: auto; }
-  .layer-btn { font-size: 11px; padding: 3px 8px; border-radius: 4px; border: 0.5px solid var(--color-border-secondary); background: var(--color-background-primary); color: var(--color-text-secondary); cursor: pointer; }
-  .layer-btn.active { background: #185FA5; color: white; border-color: #185FA5; }
+  .popup-sides { background: #f5f5f5; border-radius: 6px; padding: 6px 8px; }
 </style>
 
 <div id="app">
-  <div id="toolbar">
-    <h2>⚔ Battle Explorer</h2>
-    <button class="filter-btn active" data-war="all" style="background:#555">All</button>
-    <button class="filter-btn" data-war="ww1" style="">WW1</button>
-    <button class="filter-btn" data-war="ww2" style="">WW2</button>
-    <button class="filter-btn" data-war="napoleonic" style="">Napoleonic</button>
-    <button class="filter-btn" data-war="ancient" style="">Ancient</button>
-    <button class="filter-btn" data-war="medieval" style="">Medieval</button>
-    <button class="filter-btn" data-war="indian" style="">Indian</button>
-    <div class="layer-toggle">
-      <button class="layer-btn active" id="btn-street">Map</button>
-      <button class="layer-btn" id="btn-terrain">Terrain</button>
-      <button class="layer-btn" id="btn-satellite">Satellite</button>
+  <!-- LEFT PANEL -->
+  <div id="panel">
+    <div id="panel-header">
+      <h2>⚔ Battle Explorer</h2>
+      <p id="count-label">22 battles on map</p>
+    </div>
+    <div id="panel-body">
+
+      <!-- Map style -->
+      <div class="section-label">Map Style</div>
+      <div class="map-toggle">
+        <button class="map-btn active" id="btn-street">🗺 Map</button>
+        <button class="map-btn" id="btn-satellite">🛰 Satellite</button>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- War filters -->
+      <div class="section-label">Filter by Era</div>
+      <button class="war-btn active" data-war="all"><span class="war-dot" style="background:#aaa"></span>All Battles</button>
+      <button class="war-btn" data-war="ww1"><span class="war-dot" style="background:#185FA5"></span>World War I</button>
+      <button class="war-btn" data-war="ww2"><span class="war-dot" style="background:#A32D2D"></span>World War II</button>
+      <button class="war-btn" data-war="napoleonic"><span class="war-dot" style="background:#BA7517"></span>Napoleonic</button>
+      <button class="war-btn" data-war="ancient"><span class="war-dot" style="background:#3B6D11"></span>Ancient World</button>
+      <button class="war-btn" data-war="medieval"><span class="war-dot" style="background:#534AB7"></span>Medieval</button>
+      <button class="war-btn" data-war="indian"><span class="war-dot" style="background:#C45C00"></span>Indian History</button>
+
+      <div class="divider"></div>
+
+      <!-- Rulers -->
+      <div class="section-label">Famous Rulers</div>
+      <div id="ruler-list"></div>
+
+      <div class="divider"></div>
+
+      <!-- Battle list -->
+      <div class="section-label" id="list-label">All Battles</div>
+      <div id="battle-list"></div>
+
     </div>
   </div>
-  <div id="main">
+
+  <!-- MAP -->
+  <div id="map-wrap">
     <div id="map"></div>
-    <div id="sidebar">
-      <div class="sidebar-header" id="sidebar-count">22 battles</div>
-      <div id="battle-list"></div>
-    </div>
   </div>
 </div>
 
@@ -63,62 +118,74 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
 const wars = {
-  ww1:        { label: "World War I",      color: "#B5D4F4", text: "#0C447C", badge: "#185FA5", btn: "#185FA5" },
-  ww2:        { label: "World War II",     color: "#F7C1C1", text: "#791F1F", badge: "#A32D2D", btn: "#A32D2D" },
-  napoleonic: { label: "Napoleonic Wars",  color: "#FAC775", text: "#633806", badge: "#BA7517", btn: "#BA7517" },
-  ancient:    { label: "Ancient World",    color: "#C0DD97", text: "#27500A", badge: "#3B6D11", btn: "#3B6D11" },
-  medieval:   { label: "Medieval",         color: "#CECBF6", text: "#3C3489", badge: "#534AB7", btn: "#534AB7" },
-  indian:     { label: "Indian History",   color: "#FDDCB5", text: "#7A3300", badge: "#C45C00", btn: "#C45C00" }
+  ww1:        { label: "World War I",      color: "#B5D4F4", badge: "#185FA5" },
+  ww2:        { label: "World War II",     color: "#F7C1C1", badge: "#A32D2D" },
+  napoleonic: { label: "Napoleonic Wars",  color: "#FAC775", badge: "#BA7517" },
+  ancient:    { label: "Ancient World",    color: "#C0DD97", badge: "#3B6D11" },
+  medieval:   { label: "Medieval",         color: "#CECBF6", badge: "#534AB7" },
+  indian:     { label: "Indian History",   color: "#FDDCB5", badge: "#C45C00" }
 };
 
 const battles = [
-  { id:1,  war:"ww1",        name:"Battle of the Somme",   date:"Jul–Nov 1916",     location:"France",        lat:50.00, lng:2.70,    victor:"Allied (pyrrhic)",   casualties:"1.1 million",       desc:"One of WWI's largest battles. The British Army suffered 57,470 casualties on the first day alone — the bloodiest day in British military history.", sides:"Britain & France vs Germany" },
-  { id:2,  war:"ww1",        name:"Battle of Verdun",      date:"Feb–Dec 1916",     location:"France",        lat:49.20, lng:5.38,    victor:"French",             casualties:"700,000+",          desc:"The longest battle of WWI, fought to drain French manpower. Both sides suffered catastrophic losses over 10 months of brutal trench warfare.", sides:"France vs Germany" },
-  { id:3,  war:"ww1",        name:"Battle of Gallipoli",   date:"Apr 1915–Jan 1916",location:"Turkey",        lat:40.22, lng:26.41,   victor:"Ottoman Empire",     casualties:"500,000+",          desc:"An Allied attempt to open a sea route to Russia. A costly failure that shaped national identity in Australia and New Zealand.", sides:"Allies vs Ottoman Empire" },
-  { id:4,  war:"ww2",        name:"Battle of Stalingrad",  date:"Aug 1942–Feb 1943",location:"Russia",        lat:48.70, lng:44.52,   victor:"Soviet Union",       casualties:"2 million+",        desc:"Widely considered the turning point of WWII on the Eastern Front. German forces were encircled and destroyed in a catastrophic defeat.", sides:"USSR vs Germany" },
-  { id:5,  war:"ww2",        name:"D-Day (Normandy)",      date:"Jun 6, 1944",      location:"France",        lat:49.35, lng:-0.87,   victor:"Allies",             casualties:"10,000–12,000 Allied",desc:"The largest seaborne invasion in history. Allied forces stormed five beaches in Normandy, beginning the liberation of Western Europe.", sides:"Allies vs Germany" },
-  { id:6,  war:"ww2",        name:"Battle of Midway",      date:"Jun 4–7, 1942",    location:"Pacific Ocean", lat:28.21, lng:-177.36, victor:"United States",      casualties:"3,400 Japanese, 362 US",desc:"A decisive naval battle where the US destroyed four Japanese fleet carriers, ending Japan's ability to take the strategic offensive.", sides:"USA vs Japan" },
-  { id:7,  war:"ww2",        name:"Battle of Britain",     date:"Jul–Oct 1940",     location:"UK",            lat:51.50, lng:-0.12,   victor:"Britain",            casualties:"44,000+ civilians", desc:"The first major campaign fought entirely by air forces. The RAF's successful defense prevented a German invasion of Britain.", sides:"Britain vs Germany" },
-  { id:8,  war:"napoleonic", name:"Battle of Waterloo",    date:"Jun 18, 1815",     location:"Belgium",       lat:50.68, lng:4.41,    victor:"Allies",             casualties:"47,000–60,000",     desc:"Napoleon's final defeat. Wellington's forces and Prussian troops crushed the French Imperial Army, ending Napoleon's rule forever.", sides:"France vs Britain, Prussia, Netherlands" },
-  { id:9,  war:"napoleonic", name:"Battle of Austerlitz",  date:"Dec 2, 1805",      location:"Czech Republic",lat:49.10, lng:16.76,   victor:"France",             casualties:"36,000+",           desc:"Considered Napoleon's greatest victory — he feigned weakness then crushed the Allied center, routing a combined Austrian-Russian force.", sides:"France vs Austria & Russia" },
-  { id:10, war:"napoleonic", name:"Battle of Borodino",    date:"Sep 7, 1812",      location:"Russia",        lat:55.52, lng:35.82,   victor:"Inconclusive",       casualties:"70,000–100,000",    desc:"The bloodiest single day of the Napoleonic Wars. Though Napoleon held the field, the Russian Army survived to force France's catastrophic retreat.", sides:"France vs Russia" },
-  { id:11, war:"ancient",    name:"Battle of Marathon",    date:"490 BC",           location:"Greece",        lat:38.11, lng:24.03,   victor:"Athens",             casualties:"6,400 Persian, 192 Athenian",desc:"A vastly outnumbered Athenian army defeated the Persian invaders, preserving Greek independence and democracy.", sides:"Athens vs Persia" },
-  { id:12, war:"ancient",    name:"Battle of Thermopylae", date:"480 BC",           location:"Greece",        lat:38.80, lng:22.53,   victor:"Persia",             casualties:"~20,000 Persian, 300 Spartans",desc:"King Leonidas and 300 Spartans held a narrow mountain pass for three days against a massive Persian army — one of history's greatest symbols of courage.", sides:"Sparta & Allies vs Persia" },
-  { id:13, war:"ancient",    name:"Battle of Gaugamela",   date:"Oct 1, 331 BC",    location:"Iraq",          lat:36.50, lng:43.10,   victor:"Macedon",            casualties:"~50,000 Persian",   desc:"Alexander the Great's decisive victory over Darius III, ending the Achaemenid Persian Empire and opening the path to his eastern conquests.", sides:"Macedon vs Persia" },
-  { id:14, war:"medieval",   name:"Battle of Hastings",    date:"Oct 14, 1066",     location:"England",       lat:50.91, lng:0.49,    victor:"Normans",            casualties:"~10,000+",          desc:"William the Conqueror defeated King Harold II, fundamentally changing English history and culture through the Norman conquest.", sides:"Normans vs Anglo-Saxons" },
-  { id:15, war:"medieval",   name:"Battle of Agincourt",   date:"Oct 25, 1415",     location:"France",        lat:50.46, lng:2.14,    victor:"England",            casualties:"6,000–11,000 French",desc:"Henry V's outnumbered English army devastated the French nobility. English longbowmen proved decisive against armored knights in muddy conditions.", sides:"England vs France" },
-
-  { id:17, war:"indian", name:"Battle of Panipat (First)",   date:"Apr 21, 1526",     location:"India",         lat:29.39, lng:76.97,   victor:"Mughals",            casualties:"~20,000",           desc:"Babur defeated Ibrahim Lodi using artillery and flanking tactics, founding the Mughal Empire that would rule the subcontinent for over three centuries.", sides:"Mughal Empire vs Lodi Sultanate" },
-  { id:18, war:"indian", name:"Battle of Haldighati",        date:"Jun 18, 1576",     location:"India",         lat:24.83, lng:73.68,   victor:"Mughal (tactical)",  casualties:"~17,000",           desc:"Maharana Pratap of Mewar fiercely resisted the Mughal Emperor Akbar's forces. Though outnumbered, Pratap became a symbol of Rajput valor and resistance.", sides:"Mewar (Rajputs) vs Mughal Empire" },
-  { id:19, war:"indian", name:"Battle of Plassey",           date:"Jun 23, 1757",     location:"India",         lat:23.80, lng:88.25,   victor:"British East India Co.", casualties:"~500 total",      desc:"Robert Clive's decisive victory over the Nawab of Bengal marked the beginning of British political dominance over India, made possible largely by betrayal.", sides:"British East India Co. vs Nawab of Bengal" },
-  { id:20, war:"indian", name:"Battle of Panipat (Third)",   date:"Jan 14, 1761",     location:"India",         lat:29.39, lng:76.97,   victor:"Afghan Durrani",     casualties:"~100,000+",         desc:"One of the largest battles of the 18th century. Ahmed Shah Durrani crushed the Maratha Confederacy, halting their expansion and reshaping the balance of power in India.", sides:"Afghan Durrani Empire vs Maratha Confederacy" },
-  { id:21, war:"indian", name:"Battle of Saragarhi",         date:"Sep 12, 1897",     location:"Pakistan",      lat:33.61, lng:70.95,   victor:"Afghan Tribes (pyrrhic)", casualties:"21 Sikhs, ~600 Afghan", desc:"21 Sikh soldiers of the 36th Sikhs held a signal post against over 10,000 Afghan tribesmen, fighting to the last man. Considered one of the greatest last stands in military history.", sides:"British Indian Army vs Afghan Orakzai Tribes" },
-  { id:22, war:"indian", name:"Battle of Talikota",          date:"Jan 23, 1565",     location:"India",         lat:16.47, lng:76.32,   victor:"Deccan Sultanates",  casualties:"~100,000+",         desc:"A coalition of Deccan Sultanates defeated the mighty Vijayanagara Empire, one of the largest Hindu kingdoms, bringing an end to its dominance over South India.", sides:"Vijayanagara Empire vs Deccan Sultanates" },
-  { id:16, war:"medieval",   name:"Battle of Tours",       date:"Oct 732 AD",       location:"France",        lat:47.00, lng:0.70,    victor:"Franks",             casualties:"Unknown",           desc:"Charles Martel halted Umayyad expansion into Western Europe — many historians consider it one of the most decisive battles in shaping Christian European civilization.", sides:"Franks vs Umayyad Caliphate" },
+  { id:1,  war:"ww1",        name:"Battle of the Somme",        date:"Jul–Nov 1916",      location:"France",        lat:50.00, lng:2.70,    victor:"Allied (pyrrhic)",       casualties:"1.1 million",            desc:"One of WWI's largest battles. The British Army suffered 57,470 casualties on the first day alone — the bloodiest day in British military history.", sides:"Britain & France vs Germany",    rulers:["haig","foch"] },
+  { id:2,  war:"ww1",        name:"Battle of Verdun",           date:"Feb–Dec 1916",      location:"France",        lat:49.20, lng:5.38,    victor:"French",                 casualties:"700,000+",               desc:"The longest battle of WWI, fought to drain French manpower. Both sides suffered catastrophic losses over 10 months of brutal trench warfare.", sides:"France vs Germany",              rulers:["foch"] },
+  { id:3,  war:"ww1",        name:"Battle of Gallipoli",        date:"Apr 1915–Jan 1916", location:"Turkey",        lat:40.22, lng:26.41,   victor:"Ottoman Empire",         casualties:"500,000+",               desc:"An Allied attempt to open a sea route to Russia. A costly failure that shaped national identity in Australia and New Zealand.", sides:"Allies vs Ottoman Empire",       rulers:[] },
+  { id:4,  war:"ww2",        name:"Battle of Stalingrad",       date:"Aug 1942–Feb 1943", location:"Russia",        lat:48.70, lng:44.52,   victor:"Soviet Union",           casualties:"2 million+",             desc:"Widely considered the turning point of WWII on the Eastern Front. German forces were encircled and destroyed in a catastrophic defeat.", sides:"USSR vs Germany",                rulers:["zhukov","hitler"] },
+  { id:5,  war:"ww2",        name:"D-Day (Normandy)",           date:"Jun 6, 1944",       location:"France",        lat:49.35, lng:-0.87,   victor:"Allies",                 casualties:"10,000–12,000 Allied",   desc:"The largest seaborne invasion in history. Allied forces stormed five beaches in Normandy, beginning the liberation of Western Europe.", sides:"Allies vs Germany",              rulers:["eisenhower","hitler"] },
+  { id:6,  war:"ww2",        name:"Battle of Midway",           date:"Jun 4–7, 1942",     location:"Pacific Ocean", lat:28.21, lng:-177.36, victor:"United States",          casualties:"3,400 Japanese, 362 US", desc:"A decisive naval battle where the US destroyed four Japanese fleet carriers, ending Japan's ability to take the strategic offensive.", sides:"USA vs Japan",                   rulers:["nimitz"] },
+  { id:7,  war:"ww2",        name:"Battle of Britain",          date:"Jul–Oct 1940",      location:"UK",            lat:51.50, lng:-0.12,   victor:"Britain",                casualties:"44,000+ civilians",      desc:"The first major campaign fought entirely by air forces. The RAF's successful defense prevented a German invasion of Britain.", sides:"Britain vs Germany",             rulers:["churchill","hitler"] },
+  { id:8,  war:"napoleonic", name:"Battle of Waterloo",         date:"Jun 18, 1815",      location:"Belgium",       lat:50.68, lng:4.41,    victor:"Allies",                 casualties:"47,000–60,000",          desc:"Napoleon's final defeat. Wellington's forces and Prussian troops crushed the French Imperial Army, ending Napoleon's rule forever.", sides:"France vs Britain, Prussia, Netherlands", rulers:["napoleon","wellington"] },
+  { id:9,  war:"napoleonic", name:"Battle of Austerlitz",       date:"Dec 2, 1805",       location:"Czech Republic",lat:49.10, lng:16.76,   victor:"France",                 casualties:"36,000+",                desc:"Considered Napoleon's greatest victory — he feigned weakness then crushed the Allied center, routing a combined Austrian-Russian force.", sides:"France vs Austria & Russia",     rulers:["napoleon"] },
+  { id:10, war:"napoleonic", name:"Battle of Borodino",         date:"Sep 7, 1812",       location:"Russia",        lat:55.52, lng:35.82,   victor:"Inconclusive",           casualties:"70,000–100,000",         desc:"The bloodiest single day of the Napoleonic Wars. Though Napoleon held the field, the Russian Army survived to force France's catastrophic retreat.", sides:"France vs Russia",               rulers:["napoleon"] },
+  { id:11, war:"ancient",    name:"Battle of Marathon",         date:"490 BC",            location:"Greece",        lat:38.11, lng:24.03,   victor:"Athens",                 casualties:"6,400 Persian, 192 Athenian", desc:"A vastly outnumbered Athenian army defeated the Persian invaders, preserving Greek independence and democracy.", sides:"Athens vs Persia",               rulers:["alexander"] },
+  { id:12, war:"ancient",    name:"Battle of Thermopylae",      date:"480 BC",            location:"Greece",        lat:38.80, lng:22.53,   victor:"Persia",                 casualties:"~20,000 Persian, 300 Spartans", desc:"King Leonidas and 300 Spartans held a narrow mountain pass for three days against a massive Persian army — one of history's greatest symbols of courage.", sides:"Sparta & Allies vs Persia",      rulers:[] },
+  { id:13, war:"ancient",    name:"Battle of Gaugamela",        date:"Oct 1, 331 BC",     location:"Iraq",          lat:36.50, lng:43.10,   victor:"Macedon",                casualties:"~50,000 Persian",         desc:"Alexander the Great's decisive victory over Darius III, ending the Achaemenid Persian Empire and opening the path to his eastern conquests.", sides:"Macedon vs Persia",              rulers:["alexander"] },
+  { id:14, war:"medieval",   name:"Battle of Hastings",         date:"Oct 14, 1066",      location:"England",       lat:50.91, lng:0.49,    victor:"Normans",                casualties:"~10,000+",               desc:"William the Conqueror defeated King Harold II, fundamentally changing English history and culture through the Norman conquest.", sides:"Normans vs Anglo-Saxons",        rulers:[] },
+  { id:15, war:"medieval",   name:"Battle of Agincourt",        date:"Oct 25, 1415",      location:"France",        lat:50.46, lng:2.14,    victor:"England",                casualties:"6,000–11,000 French",    desc:"Henry V's outnumbered English army devastated the French nobility. English longbowmen proved decisive against armored knights in muddy conditions.", sides:"England vs France",              rulers:[] },
+  { id:16, war:"medieval",   name:"Battle of Tours",            date:"Oct 732 AD",        location:"France",        lat:47.00, lng:0.70,    victor:"Franks",                 casualties:"Unknown",                desc:"Charles Martel halted Umayyad expansion into Western Europe — many historians consider it one of the most decisive battles in shaping Christian European civilization.", sides:"Franks vs Umayyad Caliphate",    rulers:[] },
+  { id:17, war:"indian",     name:"Battle of Panipat (First)",  date:"Apr 21, 1526",      location:"India",         lat:29.39, lng:76.97,   victor:"Mughals",                casualties:"~20,000",                desc:"Babur defeated Ibrahim Lodi using artillery and flanking tactics, founding the Mughal Empire that would rule the subcontinent for over three centuries.", sides:"Mughal Empire vs Lodi Sultanate", rulers:["babur","akbar"] },
+  { id:18, war:"indian",     name:"Battle of Haldighati",       date:"Jun 18, 1576",      location:"India",         lat:24.83, lng:73.68,   victor:"Mughal (tactical)",      casualties:"~17,000",                desc:"Maharana Pratap of Mewar fiercely resisted the Mughal Emperor Akbar's forces. Though outnumbered, Pratap became a symbol of Rajput valor and resistance.", sides:"Mewar (Rajputs) vs Mughal Empire",rulers:["akbar","pratap"] },
+  { id:19, war:"indian",     name:"Battle of Plassey",          date:"Jun 23, 1757",      location:"India",         lat:23.80, lng:88.25,   victor:"British East India Co.", casualties:"~500 total",             desc:"Robert Clive's decisive victory over the Nawab of Bengal marked the beginning of British political dominance over India, made possible largely by betrayal.", sides:"British East India Co. vs Nawab of Bengal", rulers:["clive"] },
+  { id:20, war:"indian",     name:"Battle of Panipat (Third)",  date:"Jan 14, 1761",      location:"India",         lat:29.40, lng:76.98,   victor:"Afghan Durrani",         casualties:"~100,000+",              desc:"One of the largest battles of the 18th century. Ahmed Shah Durrani crushed the Maratha Confederacy, halting their expansion and reshaping the balance of power in India.", sides:"Afghan Durrani Empire vs Maratha Confederacy", rulers:["babur"] },
+  { id:21, war:"indian",     name:"Battle of Saragarhi",        date:"Sep 12, 1897",      location:"Pakistan",      lat:33.61, lng:70.95,   victor:"Afghan Tribes (pyrrhic)",casualties:"21 Sikhs, ~600 Afghan",  desc:"21 Sikh soldiers of the 36th Sikhs held a signal post against over 10,000 Afghan tribesmen, fighting to the last man. Considered one of history's greatest last stands.", sides:"British Indian Army vs Afghan Tribes", rulers:[] },
+  { id:22, war:"indian",     name:"Battle of Talikota",         date:"Jan 23, 1565",      location:"India",         lat:16.47, lng:76.32,   victor:"Deccan Sultanates",      casualties:"~100,000+",              desc:"A coalition of Deccan Sultanates defeated the mighty Vijayanagara Empire, one of the largest Hindu kingdoms, bringing an end to its dominance over South India.", sides:"Vijayanagara Empire vs Deccan Sultanates", rulers:["akbar"] },
 ];
 
-const map = L.map('map', { zoomControl: true }).setView([45, 15], 3);
+const rulers = [
+  { id:"napoleon",   name:"Napoleon Bonaparte", era:"French Empire",   emoji:"👑", battles:[8,9,10] },
+  { id:"alexander",  name:"Alexander the Great",era:"Ancient Macedon", emoji:"⚔️", battles:[11,13] },
+  { id:"wellington", name:"Duke of Wellington", era:"British Empire",  emoji:"🎖", battles:[8] },
+  { id:"churchill",  name:"Winston Churchill",  era:"World War II",    emoji:"🏛", battles:[7] },
+  { id:"hitler",     name:"Adolf Hitler",       era:"World War II",    emoji:"☠️", battles:[4,5,7] },
+  { id:"zhukov",     name:"Marshal Zhukov",     era:"World War II",    emoji:"⭐", battles:[4] },
+  { id:"eisenhower", name:"Dwight Eisenhower",  era:"World War II",    emoji:"🎖", battles:[5] },
+  { id:"nimitz",     name:"Admiral Nimitz",     era:"World War II",    emoji:"⚓", battles:[6] },
+  { id:"haig",       name:"Field Marshal Haig", era:"World War I",     emoji:"🎖", battles:[1] },
+  { id:"foch",       name:"Marshal Foch",       era:"World War I",     emoji:"🎖", battles:[1,2] },
+  { id:"babur",      name:"Babur",              era:"Mughal Empire",   emoji:"👑", battles:[17,20] },
+  { id:"akbar",      name:"Akbar the Great",    era:"Mughal Empire",   emoji:"👑", battles:[17,18,22] },
+  { id:"pratap",     name:"Maharana Pratap",    era:"Rajput / Mewar",  emoji:"⚔️", battles:[18] },
+  { id:"clive",      name:"Robert Clive",       era:"British India",   emoji:"🏴", battles:[19] },
+];
 
-const osmAttr = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors';
-const layers = {
+// Map setup
+const map = L.map('map', { zoomControl: true }).setView([30, 20], 2);
+const osmAttr = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+const tileLayers = {
   street:    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: osmAttr }),
-  terrain:   L.tileLayer('https://tiles.stadiamaps.com/tiles/stamen_terrain/{z}/{x}/{y}{r}.png', { maxZoom: 18, attribution: osmAttr + ' | &copy; <a href="https://stamen.com" target="_blank">Stamen Design</a> / <a href="https://stadiamaps.com" target="_blank">Stadia Maps</a>' }),
   satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: '&copy; Esri' }),
 };
-layers.street.addTo(map);
+tileLayers.street.addTo(map);
 let activeLayer = 'street';
 
 document.getElementById('btn-street').onclick = () => switchLayer('street');
-document.getElementById('btn-terrain').onclick = () => switchLayer('terrain');
 document.getElementById('btn-satellite').onclick = () => switchLayer('satellite');
-
 function switchLayer(name) {
-  map.removeLayer(layers[activeLayer]);
-  layers[name].addTo(map);
+  map.removeLayer(tileLayers[activeLayer]);
+  tileLayers[name].addTo(map);
   activeLayer = name;
-  ['street','terrain','satellite'].forEach(n => {
-    document.getElementById('btn-'+n).classList.toggle('active', n === name);
-  });
+  document.getElementById('btn-street').classList.toggle('active', name === 'street');
+  document.getElementById('btn-satellite').classList.toggle('active', name === 'satellite');
 }
 
 function makeIcon(war, selected) {
@@ -128,18 +195,8 @@ function makeIcon(war, selected) {
     <circle cx="18" cy="18" r="14" fill="${w.badge}" stroke="white" stroke-width="3"/>
     <text x="18" y="23" text-anchor="middle" font-size="13" fill="white">✦</text>
   </svg>`;
-  return L.divIcon({
-    html: svg,
-    className: '',
-    iconSize: [size, size],
-    iconAnchor: [size/2, size/2],
-    popupAnchor: [0, -size/2]
-  });
+  return L.divIcon({ html: svg, className: '', iconSize: [size,size], iconAnchor: [size/2,size/2], popupAnchor: [0,-size/2] });
 }
-
-let activeWar = 'all';
-let selectedId = null;
-let markers = {};
 
 function buildPopup(b) {
   const w = wars[b.war];
@@ -156,12 +213,23 @@ function buildPopup(b) {
   </div>`;
 }
 
+let activeWar = 'all';
+let activeRuler = null;
+let selectedId = null;
+let markers = {};
 
+function getFilteredBattles() {
+  if (activeRuler) {
+    const r = rulers.find(x => x.id === activeRuler);
+    return r ? battles.filter(b => r.battles.includes(b.id)) : [];
+  }
+  return battles.filter(b => activeWar === 'all' || b.war === activeWar);
+}
 
-function renderMarkers(filter) {
+function renderMarkers() {
   Object.values(markers).forEach(m => map.removeLayer(m));
   markers = {};
-  battles.filter(b => filter === 'all' || b.war === filter).forEach(b => {
+  getFilteredBattles().forEach(b => {
     const marker = L.marker([b.lat, b.lng], { icon: makeIcon(b.war, b.id === selectedId) })
       .addTo(map)
       .bindPopup(buildPopup(b), { maxWidth: 280, minWidth: 260 });
@@ -170,66 +238,91 @@ function renderMarkers(filter) {
   });
 }
 
-function renderList(filter) {
-  const visible = battles.filter(b => filter === 'all' || b.war === filter);
-  document.getElementById('sidebar-count').textContent = `${visible.length} battle${visible.length !== 1 ? 's' : ''}`;
+function renderBattleList() {
+  const visible = getFilteredBattles();
+  const label = activeRuler ? rulers.find(r=>r.id===activeRuler)?.name + "'s Battles" : (activeWar === 'all' ? 'All Battles' : wars[activeWar]?.label);
+  document.getElementById('list-label').textContent = label || 'Battles';
+  document.getElementById('count-label').textContent = `${visible.length} battle${visible.length !== 1 ? 's' : ''} on map`;
   document.getElementById('battle-list').innerHTML = visible.map(b => {
     const w = wars[b.war];
-    return `<div class="battle-card ${b.id === selectedId ? 'selected' : ''}" 
-      style="border-left-color: ${b.id === selectedId ? w.badge : 'transparent'}"
-      onclick="selectBattle(${b.id}, true)">
-      <div class="card-war" style="color:${w.badge}">${w.label}</div>
-      <div class="card-name">${b.name}</div>
-      <div class="card-meta">${b.location} · ${b.date}</div>
+    return `<div class="battle-item ${b.id === selectedId ? 'selected' : ''}" onclick="selectBattle(${b.id},true)" style="border-left-color:${b.id===selectedId?w.badge:'transparent'}">
+      <div class="battle-dot" style="background:${w.badge}"></div>
+      <div class="battle-info">
+        <div class="b-name">${b.name}</div>
+        <div class="b-meta">${b.location} · ${b.date}</div>
+      </div>
     </div>`;
   }).join('');
 }
 
-window.selectBattle = function(id, flyTo) {
-  selectedId = id;
-  renderMarkers(activeWar);
-  renderList(activeWar);
-  const b = battles.find(x => x.id === id);
-  if (!b) return;
-  if (flyTo) {
-    map.flyTo([b.lat, b.lng], 8, { duration: 1.2 });
+function renderRulers() {
+  document.getElementById('ruler-list').innerHTML = rulers.map(r => `
+    <button class="ruler-btn ${activeRuler===r.id?'active':''}" onclick="selectRuler('${r.id}')">
+      <div class="ruler-avatar">${r.emoji}</div>
+      <div class="ruler-info">
+        <div class="ruler-name">${r.name}</div>
+        <div class="ruler-sub">${r.era} · ${r.battles.length} battle${r.battles.length!==1?'s':''}</div>
+      </div>
+    </button>`).join('');
+}
+
+window.selectRuler = function(id) {
+  if (activeRuler === id) {
+    activeRuler = null;
+  } else {
+    activeRuler = id;
+    activeWar = 'all';
+    selectedId = null;
+    document.querySelectorAll('.war-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector('.war-btn[data-war="all"]').classList.add('active');
   }
-  setTimeout(() => {
-    if (markers[id]) markers[id].openPopup();
-  }, flyTo ? 1300 : 50);
+  renderRulers();
+  renderMarkers();
+  renderBattleList();
+  const visible = getFilteredBattles();
+  if (visible.length) {
+    if (visible.length === 1) {
+      map.flyTo([visible[0].lat, visible[0].lng], 6, { duration: 1 });
+    } else {
+      const lats = visible.map(b=>b.lat), lngs = visible.map(b=>b.lng);
+      map.flyToBounds(L.latLngBounds([Math.min(...lats)-3,Math.min(...lngs)-3],[Math.max(...lats)+3,Math.max(...lngs)+3]),{duration:1,padding:[30,30]});
+    }
+  }
 };
 
-document.getElementById('toolbar').addEventListener('click', e => {
-  const btn = e.target.closest('.filter-btn');
-  if (!btn) return;
-  document.querySelectorAll('.filter-btn').forEach(b => {
-    b.classList.remove('active');
-    b.style.background = '';
-    b.style.color = '';
-  });
-  btn.classList.add('active');
-  btn.style.background = '#555';
-  btn.style.color = 'white';
-  activeWar = btn.dataset.war;
-  selectedId = null;
-  renderMarkers(activeWar);
-  renderList(activeWar);
+window.selectBattle = function(id, flyTo) {
+  selectedId = id;
+  renderMarkers();
+  renderBattleList();
+  const b = battles.find(x => x.id === id);
+  if (!b) return;
+  if (flyTo) map.flyTo([b.lat, b.lng], 7, { duration: 1.2 });
+  setTimeout(() => { if (markers[id]) markers[id].openPopup(); }, flyTo ? 1300 : 50);
+};
 
-  if (activeWar !== 'all') {
-    const visible = battles.filter(b => b.war === activeWar);
-    if (visible.length) {
-      const lats = visible.map(b => b.lat), lngs = visible.map(b => b.lng);
-      const bounds = L.latLngBounds(
-        [Math.min(...lats)-3, Math.min(...lngs)-3],
-        [Math.max(...lats)+3, Math.max(...lngs)+3]
-      );
-      map.flyToBounds(bounds, { duration: 1, padding: [30,30] });
+document.querySelectorAll('.war-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    activeWar = btn.dataset.war;
+    activeRuler = null;
+    selectedId = null;
+    document.querySelectorAll('.war-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    renderRulers();
+    renderMarkers();
+    renderBattleList();
+    if (activeWar !== 'all') {
+      const visible = getFilteredBattles();
+      if (visible.length) {
+        const lats = visible.map(b=>b.lat), lngs = visible.map(b=>b.lng);
+        map.flyToBounds(L.latLngBounds([Math.min(...lats)-3,Math.min(...lngs)-3],[Math.max(...lats)+3,Math.max(...lngs)+3]),{duration:1,padding:[30,30]});
+      }
+    } else {
+      map.flyTo([30,20], 2, { duration: 1 });
     }
-  } else {
-    map.flyTo([45,15], 3, { duration: 1 });
-  }
+  });
 });
 
-renderMarkers('all');
-renderList('all');
+renderRulers();
+renderMarkers();
+renderBattleList();
 </script>
