@@ -15,7 +15,7 @@
     width: 230px; min-width: 230px;
     display: flex; flex-direction: column;
     background: #1a1a2e; color: #e0e0e0;
-    overflow: hidden; z-index: 10;
+    overflow: hidden; z-index: 10; position: relative;
     transition: transform 0.3s ease;
   }
   #panel-header {
@@ -70,7 +70,7 @@
   /* ── MOBILE MENU BUTTON ── */
   #menu-btn {
     display: none;
-    position: absolute; top: 12px; left: 12px; z-index: 1000;
+    position: absolute; top: 12px; left: 12px; z-index: 900;
     width: 40px; height: 40px; border-radius: 10px;
     background: #1a1a2e; border: none; color: #fff;
     font-size: 18px; cursor: pointer;
@@ -93,7 +93,7 @@
   .popup-sides { background: #f5f5f5; border-radius: 6px; padding: 6px 8px; }
 
   /* ── MOBILE OVERLAY ── */
-  #overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 19; }
+  #overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1500; }
 
   /* ── MOBILE BREAKPOINT ── */
   @media (max-width: 640px) {
@@ -104,7 +104,7 @@
       position: fixed; top: 0; left: 0; bottom: 0;
       width: 280px; min-width: 280px;
       transform: translateX(-100%);
-      z-index: 20;
+      z-index: 1600;
       box-shadow: 4px 0 20px rgba(0,0,0,0.4);
     }
     #panel.open { transform: translateX(0); }
@@ -132,7 +132,7 @@
     <div id="panel-header">
       <div>
         <h2>⚔ Battle Explorer</h2>
-        <p id="count-label">22 battles on map</p>
+        <p id="count-label">33 battles on map</p>
       </div>
       <button id="panel-close" onclick="closePanel()">✕</button>
     </div>
@@ -154,6 +154,8 @@
       <button class="war-btn" data-war="ancient"><span class="war-dot" style="background:#3B6D11"></span>Ancient World</button>
       <button class="war-btn" data-war="medieval"><span class="war-dot" style="background:#534AB7"></span>Medieval</button>
       <button class="war-btn" data-war="indian"><span class="war-dot" style="background:#C45C00"></span>Indian History</button>
+      <button class="war-btn" data-war="modern"><span class="war-dot" style="background:#1A6B2A"></span>Modern Wars</button>
+      <button class="war-btn" data-war="mythology"><span class="war-dot" style="background:#7B2FA8"></span>Mythology & Epic</button>
 
       <div class="divider"></div>
 
@@ -180,8 +182,16 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
 // ── Panel open/close (mobile) ──
-function openPanel()  { document.getElementById('panel').classList.add('open');    document.getElementById('overlay').style.display='block'; }
-function closePanel() { document.getElementById('panel').classList.remove('open'); document.getElementById('overlay').style.display='none'; }
+function openPanel() {
+  document.getElementById('panel').classList.add('open');
+  document.getElementById('overlay').style.display = 'block';
+  document.body.style.overflow = 'hidden';
+}
+function closePanel() {
+  document.getElementById('panel').classList.remove('open');
+  document.getElementById('overlay').style.display = 'none';
+  document.body.style.overflow = '';
+}
 
 // ── Data ──
 const wars = {
@@ -191,6 +201,8 @@ const wars = {
   ancient:    { label:"Ancient World",   color:"#C0DD97", badge:"#3B6D11" },
   medieval:   { label:"Medieval",        color:"#CECBF6", badge:"#534AB7" },
   indian:     { label:"Indian History",  color:"#FDDCB5", badge:"#C45C00" },
+  modern:     { label:"Modern Wars",      color:"#D4EED4", badge:"#1A6B2A" },
+  mythology:  { label:"Mythology & Epic",  color:"#EDD5F5", badge:"#7B2FA8" },
 };
 
 const battles = [
@@ -215,6 +227,19 @@ const battles = [
   { id:19, war:"indian",     name:"Battle of Plassey",         date:"Jun 23, 1757",      location:"India",         lat:23.80, lng:88.25,   victor:"British East India Co.", casualties:"~500 total",               desc:"Robert Clive's decisive victory over the Nawab of Bengal marked the beginning of British political dominance over India, made possible largely by betrayal.", sides:"British East India Co. vs Nawab of Bengal", rulers:["clive"] },
   { id:20, war:"indian",     name:"Battle of Panipat (Third)", date:"Jan 14, 1761",      location:"India",         lat:29.40, lng:76.98,   victor:"Afghan Durrani",         casualties:"~100,000+",                desc:"One of the largest battles of the 18th century. Ahmed Shah Durrani crushed the Maratha Confederacy, halting their expansion and reshaping the balance of power in India.", sides:"Afghan Durrani Empire vs Maratha Confederacy", rulers:["babur"] },
   { id:21, war:"indian",     name:"Battle of Saragarhi",       date:"Sep 12, 1897",      location:"Pakistan",      lat:33.61, lng:70.95,   victor:"Afghan Tribes (pyrrhic)",casualties:"21 Sikhs, ~600 Afghan",    desc:"21 Sikh soldiers of the 36th Sikhs held a signal post against over 10,000 Afghan tribesmen, fighting to the last man. Considered one of history's greatest last stands.", sides:"British Indian Army vs Afghan Tribes", rulers:[] },
+  // ── Modern Wars ──
+  { id:23, war:"modern", name:"Battle of Longewala",         date:"Dec 4–5, 1971",     location:"India",         lat:27.48, lng:70.88,  victor:"India",                  casualties:"~200 Pakistani, 2 Indian", desc:"A small Indian garrison of 120 soldiers held off a Pakistani armoured column of 2,000+ troops overnight until the IAF arrived at dawn and destroyed the attacking force. A defining moment of the 1971 war.", sides:"India vs Pakistan", rulers:["indira"] },
+  { id:24, war:"modern", name:"Battle of Asal Uttar",        date:"Sep 8–10, 1965",    location:"India",         lat:31.45, lng:74.42,  victor:"India",                  casualties:"~4,000+ total",            desc:"One of the largest tank battles since WWII. Indian forces lured Pakistani armour into sugarcane fields and marshy terrain, destroying nearly 100 Pakistani tanks — India's greatest armoured victory.", sides:"India vs Pakistan", rulers:["shastri"] },
+  { id:25, war:"modern", name:"Fall of Dhaka",               date:"Dec 16, 1971",      location:"Bangladesh",    lat:23.81, lng:90.41,  victor:"India & Bangladesh",     casualties:"~90,000 POWs surrendered", desc:"Pakistani forces surrendered to the Indian Army and Mukti Bahini in Dhaka, ending the Bangladesh Liberation War and creating the new nation of Bangladesh in just 13 days of combat.", sides:"India & Mukti Bahini vs Pakistan", rulers:["indira"] },
+  { id:26, war:"modern", name:"Kargil War",                  date:"May–Jul 1999",      location:"India",         lat:34.56, lng:76.13,  victor:"India",                  casualties:"~1,400 total",             desc:"Pakistani forces infiltrated Indian-held peaks in the Kargil district of Kashmir. Indian forces launched Operation Vijay to recapture the heights — a gruelling high-altitude conflict fought above 16,000 feet.", sides:"India vs Pakistan", rulers:[] },
+  { id:27, war:"modern", name:"Six-Day War",                 date:"Jun 5–10, 1967",    location:"Israel",        lat:31.77, lng:35.23,  victor:"Israel",                 casualties:"~20,000 Arab, 800 Israeli", desc:"Israel launched pre-emptive strikes destroying Arab air forces in hours, then seized the Sinai, Gaza, West Bank, and Golan Heights in six days — one of history's most stunning military victories.", sides:"Israel vs Egypt, Jordan, Syria", rulers:[] },
+  { id:28, war:"modern", name:"Battle of Inchon",            date:"Sep 15–19, 1950",   location:"South Korea",   lat:37.45, lng:126.70, victor:"UN Forces",              casualties:"~3,500 total",             desc:"General MacArthur's daring amphibious landing deep behind North Korean lines reversed the course of the Korean War, allowing UN forces to recapture Seoul within two weeks.", sides:"UN Forces vs North Korea", rulers:[] },
+  // ── Mythology & Epic ──
+  { id:29, war:"mythology", name:"Battle of Kurukshetra (Mahabharata)", date:"~3100 BC (traditional)", location:"India", lat:29.96, lng:76.83, victor:"Pandavas",           casualties:"Millions (mythological)",  desc:"The climactic 18-day war of the Mahabharata between the Pandavas and Kauravas. Witnessed the divine Bhagavad Gita — Lord Krishna's counsel to Arjuna — and ended with the near-total destruction of the warrior class of ancient India.", sides:"Pandavas vs Kauravas", rulers:["krishna","arjuna"] },
+  { id:30, war:"mythology", name:"Battle of Lanka (Ramayana)",          date:"Treta Yuga (epic)",       location:"Sri Lanka", lat:8.50, lng:80.50, victor:"Rama",              casualties:"Countless (mythological)", desc:"Lord Rama led an army of Vanaras (monkey warriors) across the ocean to Lanka to rescue Sita from demon king Ravana. The battle culminated in a divine duel where Rama slew the ten-headed Ravana with a celestial weapon.", sides:"Rama's Vanara Army vs Ravana's Lanka", rulers:["rama","ravana"] },
+  { id:31, war:"mythology", name:"Trojan War",                          date:"~1200 BC (legendary)",    location:"Turkey",    lat:39.95, lng:26.23, victor:"Greeks",            casualties:"Countless (legendary)",    desc:"A ten-year siege of Troy by a coalition of Greek kingdoms, sparked by the abduction of Helen. The war ended with the legendary Trojan Horse — Greek warriors hidden inside brought down the city from within.", sides:"Greek Alliance vs Troy", rulers:["achilles","hector"] },
+  { id:32, war:"mythology", name:"Battle of Takamagahara",              date:"Mythological age",        location:"Japan",     lat:34.68, lng:135.83, victor:"Amaterasu's forces", casualties:"Divine (mythological)",   desc:"The celestial war in Japanese mythology between the storm god Susanoo and the sun goddess Amaterasu, shaping the heavens and leading to Amaterasu's retreat into a cave, plunging the world into darkness.", sides:"Amaterasu vs Susanoo", rulers:[] },
+  { id:33, war:"mythology", name:"War of Gods & Titans (Titanomachy)", date:"Mythological age",         location:"Greece",    lat:40.08, lng:22.36, victor:"Olympian Gods",      casualties:"Divine (mythological)",   desc:"The epic 10-year war in Greek mythology where Zeus and the Olympians overthrew the Titans who had ruled the cosmos. The Titans were cast into Tartarus, establishing the reign of the Olympian gods over creation.", sides:"Olympians vs Titans", rulers:["zeus"] },
   { id:22, war:"indian",     name:"Battle of Talikota",        date:"Jan 23, 1565",      location:"India",         lat:16.47, lng:76.32,   victor:"Deccan Sultanates",      casualties:"~100,000+",                desc:"A coalition of Deccan Sultanates defeated the mighty Vijayanagara Empire, one of the largest Hindu kingdoms, bringing an end to its dominance over South India.", sides:"Vijayanagara Empire vs Deccan Sultanates", rulers:["akbar"] },
 ];
 
@@ -233,6 +258,15 @@ const rulers = [
   { id:"akbar",      name:"Akbar the Great",    era:"Mughal Empire",  emoji:"👑", battles:[17,18,22] },
   { id:"pratap",     name:"Maharana Pratap",    era:"Rajput / Mewar", emoji:"⚔️", battles:[18] },
   { id:"clive",      name:"Robert Clive",       era:"British India",  emoji:"🏴", battles:[19] },
+  { id:"indira",     name:"Indira Gandhi",      era:"Modern India",   emoji:"👑", battles:[23,25] },
+  { id:"shastri",    name:"Lal Bahadur Shastri",era:"Modern India",   emoji:"🕊", battles:[24] },
+  { id:"krishna",    name:"Lord Krishna",        era:"Mahabharata",    emoji:"🔱", battles:[29] },
+  { id:"arjuna",     name:"Arjuna",              era:"Mahabharata",    emoji:"🏹", battles:[29] },
+  { id:"rama",       name:"Lord Rama",           era:"Ramayana",       emoji:"🏹", battles:[30] },
+  { id:"ravana",     name:"Ravana",              era:"Ramayana",       emoji:"👹", battles:[30] },
+  { id:"achilles",   name:"Achilles",            era:"Trojan War",     emoji:"⚔️", battles:[31] },
+  { id:"hector",     name:"Hector of Troy",      era:"Trojan War",     emoji:"🛡", battles:[31] },
+  { id:"zeus",       name:"Zeus",                era:"Greek Mythology",emoji:"⚡", battles:[33] },
 ];
 
 // ── Map ──
