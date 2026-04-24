@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>AR Eats</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  :root {
+    --accent: #FF3B30;
+    --accent2: #FF9F0A;
+    --glass: rgba(10,10,12,0.72);
+    --glass-light: rgba(255,255,255,0.08);
+    --text: #FFFFFF;
+    --text-dim: rgba(255,255,255,0.55);
+    --radius: 18px;
+    --font: 'DM Sans', 'Helvetica Neue', sans-serif;
+  }
+
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: #000;
+    font-family: var(--font);
+    color: var(--text);
+    touch-action: none;
+  }
+
+  /* ── camera feed ── */
+  #video {
+    position: fixed; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    transform: scaleX(1);
+  }
+
+  /* ── AR canvas ── */
+  #ar-canvas {
+    position: fixed; inset: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+  }
+
+  /* ── dot hit targets (invisible, for touch) ── */
+  #dot-layer {
+    position: fixed; inset: 0;
+    width: 100%; height: 100%;
+  }
+
+  .dot-hit {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* ── HUD top bar ── */
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0;
+    padding: env(safe-area-inset-top, 16px) 20px 14px;
+    padding-top: calc(env(safe-area-inset-top, 16px) + 14px);
+    display: flex; align-items: center; justify-content: space-between;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.6) 0%, transparent 100%);
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  #app-title {
+    font-size: 22px; font-weight: 700;
+    letter-spacing: -0.5px;
+  }
+  #app-title span { color: var(--accent); }
+
+  #status-pill {
+    font-size: 12px; font-weight: 500;
+    padding: 5px 12px; border-radius: 20px;
+    background: var(--glass);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 0.5px solid rgba(255,255,255,0.15);
+    pointer-events: none;
+  }
+
+  /* ── compass ring ── */
+  #compass-wrap {
+    position: fixed; bottom: 120px; right: 20px;
+    width: 52px; height: 52px;
+    z-index: 10;
+  }
+  #compass-svg { width: 100%; height: 100%; transition: transform 0.15s ease; }
+
+  /* ── count badge ── */
+  #count-badge {
+    position: fixed; bottom: 120px; left: 20px;
+    background: var(--glass);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 0.5px solid rgba(255,255,255,0.15);
+    border-radius: 14px;
+    padding: 10px 16px;
+    z-index: 10;
+    font-size: 13px; color: var(--text-dim);
+  }
+  #count-badge strong { color: var(--text); font-weight: 600; font-size: 18px; display: block; }
+
+  /* ── permission / loading screen ── */
+  #splash {
+    position: fixed; inset: 0;
+    background: #0a0a0c;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 20px; z-index: 100;
+    padding: 40px;
+    text-align: center;
+  }
+
+  .splash-icon {
+    width: 80px; height: 80px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border-radius: 24px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 36px;
+    margin-bottom: 8px;
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.06)} }
+
+  .splash-title { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; }
+  .splash-title span { color: var(--accent); }
+  .splash-sub { font-size: 15px; color: var(--text-dim); line-height: 1.6; max-width: 300px; }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #fff; border: none;
+    font-family: var(--font);
+    font-size: 16px; font-weight: 600;
+    padding: 16px 36px; border-radius: 50px;
+    cursor: pointer; width: 100%; max-width: 280px;
+    transition: opacity 0.15s, transform 0.1s;
+    letter-spacing: -0.2px;
+  }
+  .btn-primary:active { opacity: 0.85; transform: scale(0.97); }
+
+  .btn-secondary {
+    background: var(--glass-light);
+    color: var(--text-dim); border: 0.5px solid rgba(255,255,255,0.2);
+    font-family: var(--font);
+    font-size: 14px; font-weight: 500;
+    padding: 12px 28px; border-radius: 50px;
+    cursor: pointer; width: 100%; max-width: 280px;
+    transition: opacity 0.15s;
+  }
+
+  /* ── loading spinner ── */
+  #loading-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.5);
+    display: none; align-items: center; justify-content: center;
+    flex-direction: column; gap: 14px;
+    z-index: 90;
+  }
+  #loading-overlay.active { display: flex; }
+  .spinner {
+    width: 40px; height: 40px;
+    border: 3px solid rgba(255,255,255,0.2);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── info panel ── */
+  #info-panel {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: var(--glass);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border-top: 0.5px solid rgba(255,255,255,0.12);
+    border-radius: var(--radius) var(--radius) 0 0;
+    padding: 0 20px 20px;
+    padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    z-index: 50;
+    transform: translateY(100%);
+    transition: transform 0.38s cubic-bezier(0.32,0.72,0,1);
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+  #info-panel.open { transform: translateY(0); }
+
+  .panel-handle {
+    width: 36px; height: 4px;
+    background: rgba(255,255,255,0.25);
+    border-radius: 2px;
+    margin: 12px auto 18px;
+  }
+
+  #panel-category {
+    font-size: 11px; font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--accent);
+    margin-bottom: 4px;
+  }
+
+  #panel-name {
+    font-size: 24px; font-weight: 700;
+    letter-spacing: -0.5px;
+    line-height: 1.2;
+    margin-bottom: 10px;
+  }
+
+  .panel-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 0;
+    border-bottom: 0.5px solid rgba(255,255,255,0.08);
+    font-size: 14px; color: var(--text-dim);
+  }
+  .panel-row:last-child { border-bottom: none; }
+  .panel-icon { font-size: 16px; width: 20px; text-align: center; flex-shrink: 0; }
+  .panel-val { color: var(--text); }
+
+  .stars { color: var(--accent2); letter-spacing: 1px; }
+
+  .tag-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .tag {
+    font-size: 12px; font-weight: 500;
+    padding: 4px 12px; border-radius: 20px;
+    background: var(--glass-light);
+    border: 0.5px solid rgba(255,255,255,0.15);
+    color: var(--text-dim);
+  }
+
+  .dist-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: var(--accent);
+    font-size: 13px; font-weight: 600;
+    padding: 5px 14px; border-radius: 20px;
+    margin-bottom: 14px;
+  }
+
+  .close-btn {
+    position: absolute; top: 16px; right: 20px;
+    width: 30px; height: 30px;
+    background: var(--glass-light);
+    border: 0.5px solid rgba(255,255,255,0.15);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; color: var(--text-dim);
+    cursor: pointer;
+    line-height: 1;
+  }
+
+  /* ── calibration toast ── */
+  #calib-toast {
+    position: fixed; top: 80px; left: 50%; transform: translateX(-50%);
+    background: var(--glass);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 0.5px solid rgba(255,255,255,0.15);
+    border-radius: 50px;
+    padding: 10px 20px;
+    font-size: 13px; color: var(--text-dim);
+    white-space: nowrap;
+    z-index: 20;
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+  }
+  #calib-toast.show { opacity: 1; }
+
+  /* ── crosshair ── */
+  #crosshair {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 24px; height: 24px;
+    pointer-events: none;
+    z-index: 5;
+    opacity: 0.4;
+  }
+  #crosshair::before, #crosshair::after {
+    content: ''; position: absolute; background: #fff;
+  }
+  #crosshair::before { width: 1px; height: 100%; left: 50%; top: 0; }
+  #crosshair::after  { width: 100%; height: 1px; top: 50%; left: 0; }
+
+  /* ── refresh btn ── */
+  #refresh-btn {
+    position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
+    background: var(--glass);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 0.5px solid rgba(255,255,255,0.2);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 14px; font-weight: 500;
+    padding: 12px 24px; border-radius: 50px;
+    cursor: pointer; z-index: 10;
+    display: flex; align-items: center; gap: 8px;
+    transition: opacity 0.15s;
+    white-space: nowrap;
+  }
+  #refresh-btn:active { opacity: 0.7; }
+</style>
+</head>
+<body>
+
+<!-- camera -->
+<video id="video" autoplay playsinline muted></video>
+
+<!-- AR overlay canvas -->
+<canvas id="ar-canvas"></canvas>
+
+<!-- tap targets -->
+<div id="dot-layer"></div>
+
+<!-- crosshair -->
+<div id="crosshair"></div>
+
+<!-- HUD -->
+<div id="hud">
+  <div id="app-title">AR<span>Eats</span></div>
+  <div id="status-pill">Initializing…</div>
+</div>
+
+<!-- compass -->
+<div id="compass-wrap">
+  <svg id="compass-svg" viewBox="0 0 52 52" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="26" cy="26" r="25" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
+    <circle cx="26" cy="26" r="25" fill="rgba(10,10,12,0.6)"/>
+    <text x="26" y="11" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.4)" font-family="DM Sans,sans-serif">N</text>
+    <text x="26" y="45" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.4)" font-family="DM Sans,sans-serif">S</text>
+    <text x="9"  y="29" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.4)" font-family="DM Sans,sans-serif">W</text>
+    <text x="44" y="29" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.4)" font-family="DM Sans,sans-serif">E</text>
+    <!-- needle -->
+    <polygon id="compass-needle-n" points="26,8 23,26 29,26" fill="#FF3B30"/>
+    <polygon id="compass-needle-s" points="26,44 23,26 29,26" fill="rgba(255,255,255,0.3)"/>
+    <circle cx="26" cy="26" r="3" fill="#fff"/>
+  </svg>
+</div>
+
+<!-- count -->
+<div id="count-badge">
+  <strong id="place-count">0</strong>
+  nearby places
+</div>
+
+<!-- info panel -->
+<div id="info-panel">
+  <div class="panel-handle"></div>
+  <div class="close-btn" id="close-panel">✕</div>
+  <div id="panel-category"></div>
+  <div id="panel-name"></div>
+  <div class="dist-badge"><span>📍</span><span id="panel-dist"></span></div>
+  <div class="tag-row" id="panel-tags"></div>
+  <div id="panel-rows"></div>
+</div>
+
+<!-- loading -->
+<div id="loading-overlay">
+  <div class="spinner"></div>
+  <div style="font-size:14px;color:rgba(255,255,255,0.5)">Loading places…</div>
+</div>
+
+<!-- splash -->
+<div id="splash">
+  <div class="splash-icon">🍽️</div>
+  <div class="splash-title">AR<span>Eats</span></div>
+  <div class="splash-sub">Point your camera to discover restaurants and cafés around you in augmented reality.</div>
+  <button class="btn-primary" id="start-btn">Enable Camera & Location</button>
+  <button class="btn-secondary" id="demo-btn">Try Demo Mode</button>
+  <div style="font-size:11px;color:rgba(255,255,255,0.25);margin-top:8px">Requires HTTPS • Camera • GPS • Compass</div>
+</div>
+
+<!-- calibration toast -->
+<div id="calib-toast">Wave phone in a figure-8 to calibrate compass</div>
+
+<!-- refresh -->
+<button id="refresh-btn" style="display:none">
+  <span>↺</span> Refresh Places
+</button>
+
+<script>
+// ─────────────────────────────────────────────
+//  State
+// ─────────────────────────────────────────────
+const state = {
+  lat: null, lon: null,
+  heading: 0,        // smoothed compass heading (degrees, 0=N, CW)
+  rawHeading: 0,
+  places: [],
+  demoMode: false,
+  ready: false,
+  permOrientation: false,
+};
+
+// Low-pass filter alpha (higher = smoother but laggier)
+const SMOOTH = 0.12;
+const FOV_H  = 65;  // assumed horizontal FOV degrees (typical phone ~60-70)
+const MAX_DIST = 500; // meters radius for OSM query
+
+// ─────────────────────────────────────────────
+//  Utilities
+// ─────────────────────────────────────────────
+function toRad(d){ return d * Math.PI / 180; }
+function toDeg(r){ return r * 180 / Math.PI; }
+
+function haversine(lat1, lon1, lat2, lon2){
+  const R = 6371000;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function bearing(lat1, lon1, lat2, lon2){
+  const dLon = toRad(lon2 - lon1);
+  const y = Math.sin(dLon) * Math.cos(toRad(lat2));
+  const x = Math.cos(toRad(lat1))*Math.sin(toRad(lat2)) - Math.sin(toRad(lat1))*Math.cos(toRad(lat2))*Math.cos(dLon);
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+
+function angleDiff(a, b){
+  let d = ((a - b) + 180) % 360 - 180;
+  if(d < -180) d += 360;
+  return d;
+}
+
+function smoothAngle(current, target, alpha){
+  // handle wrap-around
+  let diff = angleDiff(target, current);
+  return (current + alpha * diff + 360) % 360;
+}
+
+function formatDist(m){
+  if(m < 1000) return Math.round(m) + ' m';
+  return (m/1000).toFixed(1) + ' km';
+}
+
+function formatCategory(tags){
+  if(tags.cuisine) return tags.cuisine.split(';')[0].replace(/_/g,' ');
+  if(tags.amenity === 'cafe') return 'Café';
+  if(tags.amenity === 'fast_food') return 'Fast Food';
+  if(tags.amenity === 'restaurant') return 'Restaurant';
+  if(tags.amenity === 'bar') return 'Bar';
+  return 'Eatery';
+}
+
+function getTypeEmoji(tags){
+  if(tags.amenity === 'cafe') return '☕';
+  if(tags.amenity === 'fast_food') return '🍔';
+  if(tags.amenity === 'bar') return '🍺';
+  return '🍽️';
+}
+
+// ─────────────────────────────────────────────
+//  DOM refs
+// ─────────────────────────────────────────────
+const video      = document.getElementById('video');
+const canvas     = document.getElementById('ar-canvas');
+const ctx        = canvas.getContext('2d');
+const dotLayer   = document.getElementById('dot-layer');
+const splash     = document.getElementById('splash');
+const statusPill = document.getElementById('status-pill');
+const loadOverlay= document.getElementById('loading-overlay');
+const infoPanel  = document.getElementById('info-panel');
+const compassSVG = document.getElementById('compass-svg');
+const calibToast = document.getElementById('calib-toast');
+const placeCount = document.getElementById('place-count');
+const refreshBtn = document.getElementById('refresh-btn');
+
+// ─────────────────────────────────────────────
+//  Canvas sizing
+// ─────────────────────────────────────────────
+function resizeCanvas(){
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// ─────────────────────────────────────────────
+//  OSM Overpass fetch
+// ─────────────────────────────────────────────
+async function fetchPlaces(lat, lon){
+  loadOverlay.classList.add('active');
+  statusPill.textContent = 'Loading places…';
+
+  const r = MAX_DIST;
+  // Query restaurants, cafes, fast food, bars
+  const query = `
+    [out:json][timeout:15];
+    (
+      node["amenity"~"restaurant|cafe|fast_food|bar"](around:${r},${lat},${lon});
+      way["amenity"~"restaurant|cafe|fast_food|bar"](around:${r},${lat},${lon});
+    );
+    out center;
+  `;
+
+  try {
+    const res = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      body: 'data=' + encodeURIComponent(query)
+    });
+    const data = await res.json();
+
+    state.places = data.elements
+      .map(el => {
+        const elLat = el.lat ?? el.center?.lat;
+        const elLon = el.lon ?? el.center?.lon;
+        if(!elLat || !elLon) return null;
+        return {
+          id: el.id,
+          name: el.tags?.name || 'Unnamed Place',
+          lat: elLat, lon: elLon,
+          tags: el.tags || {},
+          dist: haversine(lat, lon, elLat, elLon),
+        };
+      })
+      .filter(Boolean)
+      .filter(p => p.dist <= MAX_DIST)
+      .sort((a,b) => a.dist - b.dist)
+      .slice(0, 40); // cap at 40 places
+
+    placeCount.textContent = state.places.length;
+    statusPill.textContent = state.places.length > 0 ? 'Point & explore' : 'No places found';
+    showCalibToast();
+
+  } catch(e) {
+    console.error(e);
+    statusPill.textContent = 'Failed to load – retry?';
+  }
+
+  loadOverlay.classList.remove('active');
+}
+
+// ─────────────────────────────────────────────
+//  Demo places (for devices without permission)
+// ─────────────────────────────────────────────
+function loadDemoPlaces(){
+  const base = { lat: 25.1195, lon: 56.3418 }; // Fujairah area
+  const demos = [
+    { name: 'Al Meshwar Restaurant', dlat: 0.001, dlon: 0.002, tags: { amenity:'restaurant', cuisine:'arabic' } },
+    { name: 'Café de Paris',         dlat:-0.002, dlon: 0.001, tags: { amenity:'cafe' } },
+    { name: 'Tokyo Garden',          dlat: 0.003, dlon:-0.001, tags: { amenity:'restaurant', cuisine:'japanese' } },
+    { name: 'Burger District',       dlat:-0.001, dlon:-0.003, tags: { amenity:'fast_food', cuisine:'burger' } },
+    { name: 'The Shisha Lounge',     dlat: 0.0015,dlon: 0.004, tags: { amenity:'bar' } },
+    { name: 'Spice Route',           dlat:-0.003, dlon: 0.002, tags: { amenity:'restaurant', cuisine:'indian' } },
+    { name: 'Beachside Brunch',      dlat: 0.002, dlon:-0.002, tags: { amenity:'cafe', cuisine:'international' } },
+    { name: 'The Pizza Co.',         dlat:-0.004, dlon:-0.001, tags: { amenity:'restaurant', cuisine:'pizza' } },
+  ];
+  state.lat = base.lat; state.lon = base.lon;
+  state.places = demos.map((d, i) => ({
+    id: i, name: d.name,
+    lat: base.lat + d.dlat, lon: base.lon + d.dlon,
+    tags: d.tags,
+    dist: haversine(base.lat, base.lon, base.lat+d.dlat, base.lon+d.dlon)
+  }));
+  placeCount.textContent = state.places.length;
+  statusPill.textContent = 'Demo mode – rotate phone';
+}
+
+// ─────────────────────────────────────────────
+//  Compass
+// ─────────────────────────────────────────────
+function handleOrientation(e){
+  let h;
+
+  // iOS: webkitCompassHeading is the most reliable
+  if(typeof e.webkitCompassHeading === 'number' && e.webkitCompassHeading >= 0){
+    h = e.webkitCompassHeading;
+  } else if(e.absolute && e.alpha !== null){
+    h = (360 - e.alpha) % 360;
+  } else if(e.alpha !== null){
+    h = (360 - e.alpha) % 360;
+  } else {
+    return;
+  }
+
+  state.heading = smoothAngle(state.heading, h, SMOOTH);
+
+  // Update compass rose (needle points N, so rotate inverse of heading)
+  compassSVG.style.transform = `rotate(${-state.heading}deg)`;
+}
+
+async function requestOrientationPermission(){
+  if(typeof DeviceOrientationEvent !== 'undefined' &&
+     typeof DeviceOrientationEvent.requestPermission === 'function'){
+    // iOS 13+
+    try {
+      const perm = await DeviceOrientationEvent.requestPermission();
+      if(perm === 'granted'){
+        window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+        window.addEventListener('deviceorientation', handleOrientation, true);
+        state.permOrientation = true;
+      }
+    } catch(e){ console.warn('Orientation permission denied', e); }
+  } else {
+    // Android / others
+    window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+    window.addEventListener('deviceorientation', handleOrientation, true);
+    state.permOrientation = true;
+  }
+}
+
+// ─────────────────────────────────────────────
+//  Camera
+// ─────────────────────────────────────────────
+async function startCamera(){
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { exact: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      audio: false
+    });
+    video.srcObject = stream;
+  } catch(e){
+    // fallback to any camera
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+      video.srcObject = stream;
+    } catch(e2){
+      console.warn('Camera unavailable, showing black bg');
+    }
+  }
+}
+
+// ─────────────────────────────────────────────
+//  Geolocation
+// ─────────────────────────────────────────────
+function startGPS(){
+  return new Promise((resolve, reject) => {
+    if(!navigator.geolocation){ reject('No geolocation'); return; }
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        state.lat = pos.coords.latitude;
+        state.lon = pos.coords.longitude;
+        resolve(pos);
+        // Watch for updates
+        navigator.geolocation.watchPosition(pos2 => {
+          state.lat = pos2.coords.latitude;
+          state.lon = pos2.coords.longitude;
+        }, null, { enableHighAccuracy: true, maximumAge: 5000 });
+      },
+      reject,
+      { enableHighAccuracy: true, timeout: 12000 }
+    );
+  });
+}
+
+// ─────────────────────────────────────────────
+//  Start real mode
+// ─────────────────────────────────────────────
+async function startReal(){
+  splash.style.display = 'none';
+  statusPill.textContent = 'Requesting camera…';
+
+  // All in parallel where possible
+  await Promise.all([
+    startCamera(),
+    requestOrientationPermission()
+  ]);
+
+  statusPill.textContent = 'Getting location…';
+  try {
+    await startGPS();
+    await fetchPlaces(state.lat, state.lon);
+  } catch(e){
+    statusPill.textContent = 'Location failed – GPS required';
+    console.error(e);
+  }
+
+  state.ready = true;
+  refreshBtn.style.display = 'flex';
+  requestAnimationFrame(renderLoop);
+}
+
+// ─────────────────────────────────────────────
+//  Demo mode
+// ─────────────────────────────────────────────
+function startDemo(){
+  state.demoMode = true;
+  splash.style.display = 'none';
+  loadDemoPlaces();
+  // Simulate heading from device tilt if available, else just spin slowly
+  window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+  window.addEventListener('deviceorientation', handleOrientation, true);
+  // fallback simulation
+  let simHeading = 0;
+  setInterval(() => {
+    if(!state.permOrientation){
+      simHeading = (simHeading + 0.4) % 360;
+      state.heading = simHeading;
+      compassSVG.style.transform = `rotate(${-simHeading}deg)`;
+    }
+  }, 50);
+  state.ready = true;
+  refreshBtn.style.display = 'flex';
+  requestAnimationFrame(renderLoop);
+}
+
+// ─────────────────────────────────────────────
+//  Calibration toast
+// ─────────────────────────────────────────────
+function showCalibToast(){
+  calibToast.classList.add('show');
+  setTimeout(() => calibToast.classList.remove('show'), 4000);
+}
+
+// ─────────────────────────────────────────────
+//  AR Render loop
+// ─────────────────────────────────────────────
+const W = () => canvas.width;
+const H = () => canvas.height;
+
+// dot info cache per frame
+let frameDots = [];
+
+function renderLoop(){
+  requestAnimationFrame(renderLoop);
+  if(!state.ready) return;
+
+  ctx.clearRect(0, 0, W(), H());
+  frameDots = [];
+
+  const heading = state.heading;
+  const halfFOV = FOV_H / 2;
+  const cx = W() / 2;
+  const cy = H() / 2;
+
+  const now = Date.now();
+
+  for(const place of state.places){
+    if(!state.lat) break;
+    const bear = bearing(state.lat, state.lon, place.lat, place.lon);
+    const diff = angleDiff(bear, heading); // positive = right
+
+    // Only render if within FOV (+ small buffer for smooth fade)
+    const bufFOV = halfFOV + 8;
+    if(Math.abs(diff) > bufFOV) continue;
+
+    const x = cx + (diff / halfFOV) * cx;
+
+    // Y: vertical centering, slight variation by distance
+    const distFactor = Math.max(0, 1 - place.dist / MAX_DIST);
+    const y = H() * 0.42 + (1 - distFactor) * H() * 0.08;
+
+    // Size: closer = bigger
+    const baseSize = 10 + distFactor * 16;
+
+    // Edge fade
+    const edgeFade = Math.max(0, 1 - Math.abs(diff) / bufFOV);
+    const alpha = edgeFade * (0.5 + distFactor * 0.5);
+
+    // Animated pulse for closest 3
+    const rank = state.places.indexOf(place);
+    const pulse = rank < 3 ? 1 + 0.18 * Math.sin(now / 600 + rank * 2.1) : 1;
+    const r = baseSize * pulse;
+
+    // Determine color by amenity
+    let dotColor, ringColor;
+    const a = place.tags.amenity;
+    if(a === 'cafe'){
+      dotColor = `rgba(255,159,10,${alpha})`;
+      ringColor = `rgba(255,159,10,${alpha*0.35})`;
+    } else if(a === 'fast_food'){
+      dotColor = `rgba(255,69,58,${alpha})`;
+      ringColor = `rgba(255,69,58,${alpha*0.35})`;
+    } else if(a === 'bar'){
+      dotColor = `rgba(48,209,88,${alpha})`;
+      ringColor = `rgba(48,209,88,${alpha*0.35})`;
+    } else {
+      dotColor = `rgba(255,59,48,${alpha})`;
+      ringColor = `rgba(255,59,48,${alpha*0.35})`;
+    }
+
+    // Outer glow ring
+    ctx.beginPath();
+    ctx.arc(x, y, r + 8, 0, Math.PI * 2);
+    ctx.fillStyle = ringColor;
+    ctx.fill();
+
+    // Main dot
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = dotColor;
+    ctx.fill();
+
+    // White inner highlight
+    ctx.beginPath();
+    ctx.arc(x - r*0.25, y - r*0.25, r * 0.3, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255,255,255,${alpha * 0.5})`;
+    ctx.fill();
+
+    // Distance label
+    if(distFactor > 0.3){
+      const labelAlpha = edgeFade * Math.min(1, (distFactor - 0.3) / 0.3);
+      ctx.font = `600 11px 'DM Sans', sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = `rgba(255,255,255,${labelAlpha * 0.9})`;
+      ctx.fillText(formatDist(place.dist), x, y + r + 16);
+    }
+
+    // Name label for closest / large dots
+    if(r > 18 && edgeFade > 0.5){
+      const nameAlpha = edgeFade * Math.min(1, (r-18)/8);
+      ctx.font = `500 13px 'DM Sans', sans-serif`;
+      ctx.textAlign = 'center';
+      // Background pill
+      const nameW = ctx.measureText(place.name).width + 16;
+      const nameY = y - r - 22;
+      ctx.beginPath();
+      ctx.roundRect(x - nameW/2, nameY - 11, nameW, 20, 10);
+      ctx.fillStyle = `rgba(10,10,12,${nameAlpha * 0.75})`;
+      ctx.fill();
+      ctx.fillStyle = `rgba(255,255,255,${nameAlpha})`;
+      ctx.fillText(place.name, x, nameY + 4);
+    }
+
+    frameDots.push({ place, x, y, r: r + 14 });
+  }
+
+  // Rebuild hit targets
+  rebuildHitTargets();
+}
+
+// ─────────────────────────────────────────────
+//  Hit targets
+// ─────────────────────────────────────────────
+let lastDotCount = 0;
+
+function rebuildHitTargets(){
+  if(frameDots.length === lastDotCount) return;
+  lastDotCount = frameDots.length;
+  dotLayer.innerHTML = '';
+  for(const d of frameDots){
+    const el = document.createElement('div');
+    el.className = 'dot-hit';
+    el.style.left  = d.x + 'px';
+    el.style.top   = d.y + 'px';
+    el.style.width = el.style.height = Math.max(56, d.r * 2) + 'px';
+    el.addEventListener('click', () => openPanel(d.place));
+    el.addEventListener('touchend', e => { e.preventDefault(); openPanel(d.place); });
+    dotLayer.appendChild(el);
+  }
+}
+
+// ─────────────────────────────────────────────
+//  Info panel
+// ─────────────────────────────────────────────
+function openPanel(place){
+  const tags = place.tags;
+
+  document.getElementById('panel-category').textContent =
+    getTypeEmoji(tags) + ' ' + formatCategory(tags).toUpperCase();
+
+  document.getElementById('panel-name').textContent = place.name;
+  document.getElementById('panel-dist').textContent = formatDist(place.dist) + ' away';
+
+  // Tags
+  const tagRow = document.getElementById('panel-tags');
+  tagRow.innerHTML = '';
+  const tagList = [];
+  if(tags.amenity)  tagList.push(tags.amenity.replace(/_/g,' '));
+  if(tags.cuisine)  tags.cuisine.split(';').slice(0,3).forEach(c => tagList.push(c.replace(/_/g,' ')));
+  if(tags.outdoor_seating === 'yes') tagList.push('outdoor seating');
+  if(tags.takeaway === 'yes') tagList.push('takeaway');
+  if(tags.delivery === 'yes') tagList.push('delivery');
+  if(tags['diet:vegetarian'] === 'yes') tagList.push('vegetarian');
+  if(tags['diet:vegan'] === 'yes') tagList.push('vegan');
+  tagList.slice(0,5).forEach(t => {
+    const span = document.createElement('span');
+    span.className = 'tag';
+    span.textContent = t;
+    tagRow.appendChild(span);
+  });
+
+  // Rows
+  const rows = document.getElementById('panel-rows');
+  rows.innerHTML = '';
+
+  const addRow = (icon, label, val) => {
+    if(!val) return;
+    rows.innerHTML += `
+      <div class="panel-row">
+        <span class="panel-icon">${icon}</span>
+        <span style="color:var(--text-dim);flex:1">${label}</span>
+        <span class="panel-val">${val}</span>
+      </div>`;
+  };
+
+  addRow('📍', 'Distance', formatDist(place.dist));
+  addRow('🌐', 'Website', tags.website ? `<a href="${tags.website}" style="color:#64b5f6">${tags.website.replace(/https?:\/\//,'').slice(0,28)}…</a>` : null);
+  addRow('📞', 'Phone', tags.phone || tags['contact:phone'] || null);
+  addRow('🕐', 'Hours', tags.opening_hours || null);
+  addRow('🏠', 'Address', [tags['addr:street'], tags['addr:housenumber']].filter(Boolean).join(' ') || null);
+
+  if(tags.wheelchair === 'yes') addRow('♿', 'Accessibility', 'Wheelchair accessible');
+  if(tags.wifi === 'yes' || tags.internet_access === 'wlan') addRow('📶', 'WiFi', 'Available');
+
+  // OSM link
+  rows.innerHTML += `
+    <div class="panel-row">
+      <span class="panel-icon">🗺️</span>
+      <span style="color:var(--text-dim);flex:1">OpenStreetMap</span>
+      <span class="panel-val"><a href="https://www.openstreetmap.org/node/${place.id}" style="color:#64b5f6" target="_blank">View →</a></span>
+    </div>`;
+
+  infoPanel.classList.add('open');
+}
+
+document.getElementById('close-panel').addEventListener('click', () => {
+  infoPanel.classList.remove('open');
+});
+
+// swipe down to close
+let panelStartY = 0;
+infoPanel.addEventListener('touchstart', e => { panelStartY = e.touches[0].clientY; }, {passive:true});
+infoPanel.addEventListener('touchend', e => {
+  if(e.changedTouches[0].clientY - panelStartY > 60) infoPanel.classList.remove('open');
+}, {passive:true});
+
+// ─────────────────────────────────────────────
+//  Buttons
+// ─────────────────────────────────────────────
+document.getElementById('start-btn').addEventListener('click', startReal);
+document.getElementById('demo-btn').addEventListener('click', startDemo);
+
+refreshBtn.addEventListener('click', async () => {
+  if(state.demoMode){ loadDemoPlaces(); return; }
+  if(state.lat) await fetchPlaces(state.lat, state.lon);
+});
+
+// ─────────────────────────────────────────────
+//  roundRect polyfill for older Safari
+// ─────────────────────────────────────────────
+if(!CanvasRenderingContext2D.prototype.roundRect){
+  CanvasRenderingContext2D.prototype.roundRect = function(x,y,w,h,r){
+    this.moveTo(x+r, y);
+    this.lineTo(x+w-r, y);
+    this.quadraticCurveTo(x+w, y, x+w, y+r);
+    this.lineTo(x+w, y+h-r);
+    this.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+    this.lineTo(x+r, y+h);
+    this.quadraticCurveTo(x, y+h, x, y+h-r);
+    this.lineTo(x, y+r);
+    this.quadraticCurveTo(x, y, x+r, y);
+    this.closePath();
+  };
+}
+</script>
+
+<!-- Google font for DM Sans -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+</body>
+</html>
