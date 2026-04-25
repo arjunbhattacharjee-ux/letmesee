@@ -1032,9 +1032,16 @@ function renderLoop(){
 
     const x = cx + (diff / halfFOV) * cx;
 
-    // Y: vertical centering, slight variation by distance
+    // distFactor: 1.0 = very close, 0.0 = at MAX_DIST
     const distFactor = Math.max(0, 1 - place.dist / MAX_DIST);
-    const y = H() * 0.42 + (1 - distFactor) * H() * 0.08;
+
+    // Y: closer places sit higher on screen (like AR perspective).
+    // Spread across 20%–75% of screen height so dots aren't all on one line.
+    // A small deterministic jitter per place breaks ties when many share same distance.
+    const rank = state.places.indexOf(place);
+    const jitter = ((rank * 37 + 13) % 60) - 30; // –30..+30 px, stable per place
+    const yBase = H() * 0.75 - distFactor * H() * 0.50; // far=75%, close=25%
+    const y = yBase + jitter;
 
     // Size: closer = bigger, kept compact
     const baseSize = 6 + distFactor * 8;  // range 6–14px radius
@@ -1044,7 +1051,6 @@ function renderLoop(){
     const alpha = edgeFade * (0.75 + distFactor * 0.25);
 
     // Subtle pulse only for the single closest place
-    const rank = state.places.indexOf(place);
     const pulse = rank === 0 ? 1 + 0.12 * Math.sin(now / 700) : 1;
     const r = baseSize * pulse;
 
