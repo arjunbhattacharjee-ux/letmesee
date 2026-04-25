@@ -678,17 +678,11 @@ let lastRealHeading = null;        // last accepted raw heading
 function handleOrientation(e){
   let h;
 
-  // Prefer webkitCompassHeading on iOS — it is true-north referenced
+  // webkitCompassHeading is true-north referenced on iOS — use it directly.
+  // Do NOT filter by webkitCompassAccuracy — the value varies wildly by device
+  // and environment and rejects valid readings on most iPhones outdoors.
   if(typeof e.webkitCompassHeading === 'number' && e.webkitCompassHeading >= 0){
     h = e.webkitCompassHeading;
-
-    // iOS fires a spurious event with webkitCompassHeading=0 and
-    // webkitCompassAccuracy=-1 immediately after permission grant.
-    // Reject it: accuracy -1 means "uncalibrated".
-    if(e.webkitCompassAccuracy < 0 || e.webkitCompassAccuracy > 50){
-      dbg('compass: skipping uncalibrated event acc=' + e.webkitCompassAccuracy);
-      return;
-    }
   } else if(e.alpha !== null && e.alpha !== undefined){
     h = (360 - e.alpha) % 360;
   } else {
