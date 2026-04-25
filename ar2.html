@@ -516,6 +516,7 @@ async function fetchPlaces(lat, lon){
         if(!elLat || !elLon) return null;
         return {
           id: el.id,
+          osmType: el.type || 'node',   // FIX BUG 3: preserve node/way/relation
           name: el.tags?.name || 'Unnamed Place',
           lat: elLat, lon: elLon,
           tags: el.tags || {},
@@ -619,12 +620,21 @@ async function startCamera(){
     });
     video.srcObject = stream;
   } catch(e){
-    // fallback to any camera
+    // fallback to any rear camera
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
       video.srcObject = stream;
     } catch(e2){
-      console.warn('Camera unavailable, showing black bg');
+      // FIX WARN: camera denied — show clear user message instead of silent black screen
+      statusPill.textContent = '📷 Camera access denied';
+      const msg = document.createElement('div');
+      msg.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;padding:24px;z-index:20;';
+      msg.innerHTML = `<div style="font-size:40px;margin-bottom:12px">📷</div>
+        <div style="font-size:16px;font-weight:500;margin-bottom:8px">Camera access needed</div>
+        <div style="font-size:13px;color:rgba(255,255,255,0.5);max-width:240px">
+          Enable camera in your browser settings and reload the page. AR overlay will run without camera feed.
+        </div>`;
+      document.body.appendChild(msg);
     }
   }
 }
@@ -635,19 +645,41 @@ async function startCamera(){
 function startGPS(){
   return new Promise((resolve, reject) => {
     if(!navigator.geolocation){ reject('No geolocation'); return; }
+
+    // FIX WARN: show timeout countdown and fall back gracefully after 12s
+    let settled = false;
+    const timer = setTimeout(() => {
+      if(!settled){
+        settled = true;
+        reject(new Error('GPS timed out after 12s'));
+      }
+    }, 12000);
+
     navigator.geolocation.getCurrentPosition(
       pos => {
+        if(settled) return;
+        settled = true;
+        clearTimeout(timer);
         state.lat = pos.coords.latitude;
         state.lon = pos.coords.longitude;
         resolve(pos);
-        // Watch for updates
+        // Watch for position updates; also recalculate dist on each update
         navigator.geolocation.watchPosition(pos2 => {
           state.lat = pos2.coords.latitude;
           state.lon = pos2.coords.longitude;
-        }, null, { enableHighAccuracy: true, maximumAge: 5000 });
+          // FIX WARN: keep distances live as user moves
+          state.places.forEach(p => {
+            p.dist = haversine(state.lat, state.lon, p.lat, p.lon);
+          });
+        }, null, { enableHighAccuracy: true, maximumAge: 3000 });
       },
-      reject,
-      { enableHighAccuracy: true, timeout: 12000 }
+      err => {
+        if(settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(err);
+      },
+      { enableHighAccuracy: true, timeout: 11000 }
     );
   });
 }
@@ -656,6 +688,20 @@ function startGPS(){
 //  Start real mode
 // ─────────────────────────────────────────────
 async function startReal(){
+  // FIX WARN: enforce HTTPS before attempting any sensor APIs
+  if(location.protocol !== 'https:' && location.hostname !== 'localhost'){
+    splash.style.display = 'none';
+    const msg = document.createElement('div');
+    msg.style.cssText = 'position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:40px;text-align:center;background:#0a0a0c;z-index:200;';
+    msg.innerHTML = `<div style="font-size:40px">🔒</div>
+      <div style="font-size:18px;font-weight:600">HTTPS required</div>
+      <div style="font-size:14px;color:rgba(255,255,255,0.5);max-width:280px">
+        Camera, GPS, and compass only work on secure (HTTPS) connections. Please deploy to an HTTPS host.
+      </div>`;
+    document.body.appendChild(msg);
+    return;
+  }
+
   splash.style.display = 'none';
   statusPill.textContent = 'Requesting camera…';
 
@@ -830,23 +876,42 @@ function renderLoop(){
 
 // ─────────────────────────────────────────────
 //  Hit targets
+//  Rebuilt every frame so tap zones track dot
+//  positions as the phone rotates. We reuse
+//  existing DOM nodes to avoid layout thrash.
 // ─────────────────────────────────────────────
-let lastDotCount = 0;
-
 function rebuildHitTargets(){
-  if(frameDots.length === lastDotCount) return;
-  lastDotCount = frameDots.length;
-  dotLayer.innerHTML = '';
-  for(const d of frameDots){
-    const el = document.createElement('div');
-    el.className = 'dot-hit';
-    el.style.left  = d.x + 'px';
-    el.style.top   = d.y + 'px';
-    el.style.width = el.style.height = Math.max(56, d.r * 2) + 'px';
-    el.addEventListener('click', () => openPanel(d.place));
-    el.addEventListener('touchend', e => { e.preventDefault(); openPanel(d.place); });
-    dotLayer.appendChild(el);
+  const existing = dotLayer.children;
+
+  // Remove surplus nodes
+  while(dotLayer.children.length > frameDots.length){
+    dotLayer.removeChild(dotLayer.lastChild);
   }
+
+  frameDots.forEach((d, i) => {
+    let el = existing[i];
+    if(!el){
+      el = document.createElement('div');
+      el.className = 'dot-hit';
+      // Store place reference on element to avoid re-adding listeners
+      el._openHandler = null;
+      dotLayer.appendChild(el);
+    }
+
+    const size = Math.max(56, d.r * 2);
+    el.style.left   = d.x + 'px';
+    el.style.top    = d.y + 'px';
+    el.style.width  = size + 'px';
+    el.style.height = size + 'px';
+
+    // Only rewire listeners when the place changes
+    if(el._place !== d.place){
+      el._place = d.place;
+      const handler = () => openPanel(d.place);
+      el.onclick = handler;
+      el.ontouchend = e => { e.preventDefault(); handler(); };
+    }
+  });
 }
 
 // ─────────────────────────────────────────────
@@ -879,36 +944,85 @@ function openPanel(place){
     tagRow.appendChild(span);
   });
 
-  // Rows
+  // Rows — built with DOM (never innerHTML) to prevent XSS
   const rows = document.getElementById('panel-rows');
   rows.innerHTML = '';
 
-  const addRow = (icon, label, val) => {
+  // FIX WARN: recalculate live distance using current GPS position
+  const liveDist = (state.lat && state.lon)
+    ? haversine(state.lat, state.lon, place.lat, place.lon)
+    : place.dist;
+
+  function makeRow(icon, label, valNode){
+    const row = document.createElement('div');
+    row.className = 'panel-row';
+
+    const ic = document.createElement('span');
+    ic.className = 'panel-icon';
+    ic.textContent = icon;
+
+    const lb = document.createElement('span');
+    lb.style.cssText = 'color:var(--text-dim);flex:1';
+    lb.textContent = label;
+
+    const vl = document.createElement('span');
+    vl.className = 'panel-val';
+    if(typeof valNode === 'string'){
+      vl.textContent = valNode; // always text — never HTML
+    } else if(valNode instanceof Node){
+      vl.appendChild(valNode);
+    }
+
+    row.appendChild(ic); row.appendChild(lb); row.appendChild(vl);
+    rows.appendChild(row);
+  }
+
+  function addText(icon, label, val){
     if(!val) return;
-    rows.innerHTML += `
-      <div class="panel-row">
-        <span class="panel-icon">${icon}</span>
-        <span style="color:var(--text-dim);flex:1">${label}</span>
-        <span class="panel-val">${val}</span>
-      </div>`;
-  };
+    makeRow(icon, label, val);
+  }
 
-  addRow('📍', 'Distance', formatDist(place.dist));
-  addRow('🌐', 'Website', tags.website ? `<a href="${tags.website}" style="color:#64b5f6">${tags.website.replace(/https?:\/\//,'').slice(0,28)}…</a>` : null);
-  addRow('📞', 'Phone', tags.phone || tags['contact:phone'] || null);
-  addRow('🕐', 'Hours', tags.opening_hours || null);
-  addRow('🏠', 'Address', [tags['addr:street'], tags['addr:housenumber']].filter(Boolean).join(' ') || null);
+  // FIX BUG 2 (XSS): validate website URL before creating link
+  function addWebsite(rawUrl){
+    if(!rawUrl) return;
+    let safeUrl;
+    try {
+      const u = new URL(rawUrl);
+      if(u.protocol !== 'https:' && u.protocol !== 'http:') return; // reject javascript: etc.
+      safeUrl = u.href;
+    } catch(e){ return; } // unparseable URL — skip silently
 
-  if(tags.wheelchair === 'yes') addRow('♿', 'Accessibility', 'Wheelchair accessible');
-  if(tags.wifi === 'yes' || tags.internet_access === 'wlan') addRow('📶', 'WiFi', 'Available');
+    const a = document.createElement('a');
+    a.href = safeUrl;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.style.color = '#64b5f6';
+    // Display truncated hostname only (not the raw href)
+    const display = safeUrl.replace(/https?:\/\/(www\.)?/, '').split('/')[0];
+    a.textContent = display.length > 28 ? display.slice(0, 28) + '…' : display;
+    makeRow('🌐', 'Website', a);
+  }
 
-  // OSM link
-  rows.innerHTML += `
-    <div class="panel-row">
-      <span class="panel-icon">🗺️</span>
-      <span style="color:var(--text-dim);flex:1">OpenStreetMap</span>
-      <span class="panel-val"><a href="https://www.openstreetmap.org/node/${place.id}" style="color:#64b5f6" target="_blank">View →</a></span>
-    </div>`;
+  // FIX BUG 3: use correct OSM element type for deep link
+  function osmLink(){
+    const type = place.osmType || 'node'; // set during OSM parsing
+    const a = document.createElement('a');
+    a.href = `https://www.openstreetmap.org/${type}/${place.id}`;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.style.color = '#64b5f6';
+    a.textContent = 'View →';
+    makeRow('🗺️', 'OpenStreetMap', a);
+  }
+
+  addText('📍', 'Distance', formatDist(liveDist));
+  addWebsite(tags.website);
+  addText('📞', 'Phone', tags.phone || tags['contact:phone'] || null);
+  addText('🕐', 'Hours', tags.opening_hours || null);
+  addText('🏠', 'Address', [tags['addr:street'], tags['addr:housenumber']].filter(Boolean).join(' ') || null);
+  if(tags.wheelchair === 'yes') addText('♿', 'Accessibility', 'Wheelchair accessible');
+  if(tags.wifi === 'yes' || tags.internet_access === 'wlan') addText('📶', 'WiFi', 'Available');
+  osmLink();
 
   infoPanel.classList.add('open');
 }
