@@ -789,15 +789,33 @@ async function startCamera(){
 }
 
 // ─────────────────────────────────────────────
-//  Geolocation — non-blocking, retries forever
-//  The app starts immediately; GPS resolves in
-//  the background and triggers fetchPlaces when
-//  a fix arrives. No timeout kills the attempt.
+//  Geolocation
+//  Strategy:
+//  • watchPosition with no timeout (avoids iOS kCLErrorDomain error 0 spam)
+//  • On POSITION_UNAVAILABLE: exponential backoff up to 30s, then STOP
+//    and wait for the page to become visible again (user switches back to tab)
+//  • On visibility restored: reset backoff and restart watch
+//  This prevents the infinite restart loop seen when iOS kills GPS in background
 // ─────────────────────────────────────────────
-let gpsWatchId = null;
-let gpsFetched = false; // fetchPlaces called once per fix
+let gpsWatchId    = null;
+let gpsFetched    = false;
 let gpsRetryTimer = null;
 let gpsWatchActive = false;
+let gpsFailCount  = 0;          // consecutive POSITION_UNAVAILABLE count
+const GPS_MAX_FAILS = 5;        // give up after this many consecutive fails
+const GPS_BACKOFF   = [2, 4, 8, 16, 30]; // seconds between retries
+
+function clearGPSWatch(){
+  if(gpsWatchId !== null){
+    navigator.geolocation.clearWatch(gpsWatchId);
+    gpsWatchId = null;
+  }
+  if(gpsRetryTimer !== null){
+    clearTimeout(gpsRetryTimer);
+    gpsRetryTimer = null;
+  }
+  gpsWatchActive = false;
+}
 
 function startGPSWatch(){
   if(!navigator.geolocation){
@@ -805,12 +823,11 @@ function startGPSWatch(){
     statusPill.textContent = 'GPS not available on this device';
     return;
   }
-
-  if(gpsWatchActive) return; // already watching
+  if(gpsWatchActive) return;
   gpsWatchActive = true;
-  dbg('Starting GPS watch (high accuracy)…');
+  dbg('Starting GPS watch (attempt ' + (gpsFailCount + 1) + ')…');
 
-  // Show a pulsing GPS indicator while waiting
+  // Pulsing status while waiting for first fix
   let dots = 0;
   const gpsTimer = setInterval(() => {
     if(state.lat !== null){ clearInterval(gpsTimer); return; }
@@ -818,101 +835,94 @@ function startGPSWatch(){
     statusPill.textContent = 'Waiting for GPS' + '.'.repeat(dots + 1);
   }, 600);
 
-  function doWatch(){
-    // Clear any previous watch before re-registering
-    if(gpsWatchId !== null){
-      navigator.geolocation.clearWatch(gpsWatchId);
-      gpsWatchId = null;
-    }
+  gpsWatchId = navigator.geolocation.watchPosition(
+    pos => {
+      // ── SUCCESS ──
+      clearInterval(gpsTimer);
+      if(gpsRetryTimer){ clearTimeout(gpsRetryTimer); gpsRetryTimer = null; }
+      gpsFailCount = 0; // reset backoff on any success
 
-    // IMPORTANT: No custom `timeout` in options.
-    // On iOS, setting timeout on watchPosition causes spurious POSITION_UNAVAILABLE
-    // errors even immediately after a valid fix. Let the browser manage timing.
-    gpsWatchId = navigator.geolocation.watchPosition(
-      pos => {
-        clearInterval(gpsTimer);
-        if(gpsRetryTimer){ clearTimeout(gpsRetryTimer); gpsRetryTimer = null; }
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+      const acc = Math.round(pos.coords.accuracy);
+      dbg('GPS fix: ' + lat.toFixed(5) + ',' + lon.toFixed(5) + ' acc=' + acc + 'm');
 
-        const lat = pos.coords.latitude;
-        const lon = pos.coords.longitude;
-        const acc = Math.round(pos.coords.accuracy);
-        dbg('GPS fix: ' + lat.toFixed(5) + ',' + lon.toFixed(5) + ' acc=' + acc + 'm');
+      state.lat = lat;
+      state.lon = lon;
 
-        state.lat = lat;
-        state.lon = lon;
+      state.places.forEach(p => {
+        p.dist = haversine(state.lat, state.lon, p.lat, p.lon);
+      });
 
-        // Recalculate live distances for already-loaded places
-        state.places.forEach(p => {
-          p.dist = haversine(state.lat, state.lon, p.lat, p.lon);
-        });
-
-        // Fetch places on first fix
-        if(!gpsFetched){
-          gpsFetched = true;
-          fetchPlaces(lat, lon);
-        }
-      },
-      err => {
-        // Log the real error code so we can see it in debug panel
-        const codes = {1:'PERMISSION_DENIED', 2:'POSITION_UNAVAILABLE', 3:'TIMEOUT'};
-        const msg = codes[err.code] || ('ERR_' + err.code);
-        dbg('GPS error: ' + msg + ' — ' + err.message);
-
-        if(err.code === 1){
-          // Permission denied — no point retrying
-          clearInterval(gpsTimer);
-          gpsWatchActive = false;
-          statusPill.textContent = '📍 Location access denied';
-          showErrorToast('Location permission denied. Enable it in browser/device settings and reload.');
-          return;
-        }
-
-        // POSITION_UNAVAILABLE (code 2) on iOS: watchPosition sometimes fires this
-        // even after returning a valid fix (kCLErrorDomain error 0). The fix is to
-        // clear the watch and restart it after a short delay.
-        if(err.code === 2){
-          dbg('GPS POSITION_UNAVAILABLE — restarting watch in 3s…');
-          if(gpsWatchId !== null){
-            navigator.geolocation.clearWatch(gpsWatchId);
-            gpsWatchId = null;
-          }
-          gpsWatchActive = false;
-          // Only show error to user if we haven't gotten a fix yet
-          if(state.lat === null){
-            statusPill.textContent = 'GPS signal lost — retrying…';
-          }
-          gpsRetryTimer = setTimeout(() => {
-            gpsWatchActive = false;
-            startGPSWatch();
-          }, 3000);
-          return;
-        }
-
-        // TIMEOUT (code 3): simply retry immediately — browser may have given up too soon
-        if(err.code === 3){
-          dbg('GPS TIMEOUT — restarting watch…');
-          if(gpsWatchId !== null){
-            navigator.geolocation.clearWatch(gpsWatchId);
-            gpsWatchId = null;
-          }
-          gpsWatchActive = false;
-          gpsRetryTimer = setTimeout(() => {
-            gpsWatchActive = false;
-            startGPSWatch();
-          }, 1000);
-        }
-      },
-      {
-        enableHighAccuracy: true,
-        // No timeout: avoids spurious POSITION_UNAVAILABLE on iOS immediately
-        // after a valid fix (kCLErrorDomain error 0 / error 1).
-        maximumAge: 0        // never use a cached position
+      if(!gpsFetched){
+        gpsFetched = true;
+        fetchPlaces(lat, lon);
       }
-    );
-  }
+    },
+    err => {
+      // ── ERROR ──
+      clearInterval(gpsTimer);
+      const codes = {1:'PERMISSION_DENIED', 2:'POSITION_UNAVAILABLE', 3:'TIMEOUT'};
+      dbg('GPS error: ' + (codes[err.code]||'ERR_'+err.code) + ' — ' + err.message);
 
-  doWatch();
+      if(err.code === 1){
+        // Permission denied — fatal, stop entirely
+        clearGPSWatch();
+        statusPill.textContent = '📍 Location access denied';
+        showErrorToast('Location permission denied. Enable it in browser/device settings and reload.');
+        return;
+      }
+
+      // POSITION_UNAVAILABLE (2) or TIMEOUT (3) — use backoff retry
+      gpsFailCount++;
+      clearGPSWatch(); // sets gpsWatchActive = false
+
+      if(gpsFailCount > GPS_MAX_FAILS){
+        // Too many consecutive failures — iOS has killed GPS (background/lock screen).
+        // Stop hammering and wait for the page to become visible again.
+        dbg('GPS: ' + gpsFailCount + ' consecutive fails — pausing until page visible');
+        if(state.lat === null) statusPill.textContent = '📍 GPS unavailable — tap screen';
+        // visibilitychange listener (registered once below) will restart us
+        return;
+      }
+
+      const delay = (GPS_BACKOFF[gpsFailCount - 1] || 30);
+      dbg('GPS retry in ' + delay + 's (fail #' + gpsFailCount + ')…');
+      if(state.lat === null) statusPill.textContent = 'GPS retrying in ' + delay + 's…';
+
+      gpsRetryTimer = setTimeout(() => {
+        gpsRetryTimer = null;
+        startGPSWatch();
+      }, delay * 1000);
+    },
+    {
+      enableHighAccuracy: true,
+      // No timeout — avoids the kCLErrorDomain error 0 that fires immediately
+      // after a valid fix when timeout is set on iOS Safari.
+      maximumAge: 0
+    }
+  );
 }
+
+// When the user brings the page back to foreground, reset and restart GPS
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible' && state.ready){
+    dbg('Page visible — resetting GPS backoff');
+    gpsFailCount = 0;
+    clearGPSWatch();
+    startGPSWatch();
+  }
+});
+
+// Also restart on pageshow (handles iOS Safari back-forward cache restore)
+window.addEventListener('pageshow', e => {
+  if(e.persisted && state.ready){
+    dbg('pageshow (persisted) — restarting GPS');
+    gpsFailCount = 0;
+    clearGPSWatch();
+    startGPSWatch();
+  }
+});
 
 // ─────────────────────────────────────────────
 //  Start real mode
