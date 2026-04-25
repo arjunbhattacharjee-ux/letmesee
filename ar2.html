@@ -672,51 +672,89 @@ function loadDemoPlaces(){
 // ─────────────────────────────────────────────
 //  Compass
 // ─────────────────────────────────────────────
+let orientationCount = 0;          // count of real events received
+let lastRealHeading = null;        // last accepted raw heading
+
 function handleOrientation(e){
   let h;
 
-  // iOS: webkitCompassHeading is the most reliable
+  // Prefer webkitCompassHeading on iOS — it is true-north referenced
   if(typeof e.webkitCompassHeading === 'number' && e.webkitCompassHeading >= 0){
     h = e.webkitCompassHeading;
-  } else if(e.absolute && e.alpha !== null){
-    h = (360 - e.alpha) % 360;
-  } else if(e.alpha !== null){
+
+    // iOS fires a spurious event with webkitCompassHeading=0 and
+    // webkitCompassAccuracy=-1 immediately after permission grant.
+    // Reject it: accuracy -1 means "uncalibrated".
+    if(e.webkitCompassAccuracy < 0 || e.webkitCompassAccuracy > 50){
+      dbg('compass: skipping uncalibrated event acc=' + e.webkitCompassAccuracy);
+      return;
+    }
+  } else if(e.alpha !== null && e.alpha !== undefined){
     h = (360 - e.alpha) % 360;
   } else {
     return;
   }
 
-  state.heading = smoothAngle(state.heading, h, SMOOTH);
-  state.headingReceived = true;
+  orientationCount++;
+
+  // First real event: jump straight to it, skip smoothing
+  if(!state.headingReceived){
+    state.heading = h;
+    state.headingReceived = true;
+    lastRealHeading = h;
+    dbg('compass first fix: ' + h.toFixed(1) + '° acc=' + (e.webkitCompassAccuracy ?? 'n/a'));
+  } else {
+    // Only smooth if heading actually changed (reject duplicate 0,0,0 spam)
+    if(lastRealHeading === null || Math.abs(angleDiff(h, lastRealHeading)) > 0.3){
+      lastRealHeading = h;
+      // Use faster alpha so UI tracks phone rotation without lag
+      state.heading = smoothAngle(state.heading, h, 0.25);
+    }
+  }
 
   // Update compass rose
-  compassSVG.style.transform = `rotate(${-state.heading}deg)`;
+  compassSVG.style.transform = 'rotate(' + (-state.heading) + 'deg)';
 
-  // Log heading to debug panel every 3s
+  // Log to debug panel every 3s
   const now2 = Date.now();
   if(!state._lastHeadingLog || now2 - state._lastHeadingLog > 3000){
     state._lastHeadingLog = now2;
-    dbg('heading=' + state.heading.toFixed(1) + '° raw=' + h.toFixed(1) + '°');
+    dbg('heading=' + state.heading.toFixed(1) + '° raw=' + h.toFixed(1) + '° events=' + orientationCount);
   }
+}
+
+// Re-register orientation listeners (call after permission grant AND periodically,
+// since iOS Safari sometimes silently drops the listeners)
+function registerOrientationListeners(){
+  window.removeEventListener('deviceorientationabsolute', handleOrientation, true);
+  window.removeEventListener('deviceorientation', handleOrientation, true);
+  window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+  window.addEventListener('deviceorientation', handleOrientation, true);
 }
 
 async function requestOrientationPermission(){
   if(typeof DeviceOrientationEvent !== 'undefined' &&
      typeof DeviceOrientationEvent.requestPermission === 'function'){
-    // iOS 13+
+    // iOS 13+ requires explicit permission from a user gesture
     try {
       const perm = await DeviceOrientationEvent.requestPermission();
+      dbg('orientation permission: ' + perm);
       if(perm === 'granted'){
-        window.addEventListener('deviceorientationabsolute', handleOrientation, true);
-        window.addEventListener('deviceorientation', handleOrientation, true);
+        registerOrientationListeners();
         state.permOrientation = true;
+        // Re-register every 10s as a safeguard against iOS dropping listeners
+        setInterval(registerOrientationListeners, 10000);
+      } else {
+        dbg('compass: permission denied — radar mode will stay active');
       }
-    } catch(e){ console.warn('Orientation permission denied', e); }
+    } catch(err){
+      dbg('compass permission error: ' + err.message);
+    }
   } else {
-    // Android / others
-    window.addEventListener('deviceorientationabsolute', handleOrientation, true);
-    window.addEventListener('deviceorientation', handleOrientation, true);
+    // Android / non-iOS — no permission needed
+    registerOrientationListeners();
     state.permOrientation = true;
+    dbg('compass: no permission needed, listeners registered');
   }
 }
 
@@ -1021,6 +1059,15 @@ function renderLoop(){
 
   // Rebuild hit targets
   rebuildHitTargets();
+
+  // Log render stats every 4s
+  const now4 = Date.now();
+  if(!state._lastRenderLog || now4 - state._lastRenderLog > 4000){
+    state._lastRenderLog = now4;
+    if(state.places.length > 0){
+      dbg('render: ' + frameDots.length + ' dots visible / ' + state.places.length + ' total | compass=' + (state.headingReceived ? 'OK' : 'NO'));
+    }
+  }
 }
 
 // ─────────────────────────────────────────────
