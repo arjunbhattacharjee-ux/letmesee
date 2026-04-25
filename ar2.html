@@ -382,8 +382,14 @@
 
 <!-- refresh -->
 <button id="refresh-btn" style="display:none">
-  <span>↺</span> Refresh Places
+  <span>&#x21BA;</span> Refresh Places
 </button>
+
+<!-- debug toggle -->
+<button id="debug-toggle" style="position:fixed;bottom:40px;right:20px;background:rgba(10,10,12,0.8);color:rgba(255,255,255,0.5);border:0.5px solid rgba(255,255,255,0.15);border-radius:50px;font-size:12px;padding:8px 14px;cursor:pointer;z-index:15;font-family:inherit;display:none;">&#128269; Debug</button>
+
+<!-- debug panel -->
+<div id="debug-panel" style="display:none;position:fixed;top:80px;left:10px;right:10px;bottom:auto;max-height:55vh;overflow-y:auto;background:rgba(0,0,0,0.92);color:#00ff88;font-family:monospace;font-size:11px;line-height:1.6;padding:10px 12px;border-radius:10px;z-index:80;border:0.5px solid rgba(0,255,136,0.3);white-space:pre-wrap;word-break:break-all;"></div>
 
 <script>
 // ─────────────────────────────────────────────
@@ -492,87 +498,110 @@ window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
 // ─────────────────────────────────────────────
-//  OSM Overpass fetch  (mirror-retry + diagnostics)
+//  Debug log — visible on device screen
+// ─────────────────────────────────────────────
+const debugLines = [];
+function dbg(msg){
+  const t = new Date().toISOString().slice(11,19);
+  debugLines.push(t + ' ' + msg);
+  if(debugLines.length > 28) debugLines.shift();
+  const el = document.getElementById('debug-panel');
+  if(el) el.innerText = debugLines.join('\n');
+  console.log('[AR]', msg);
+}
+
+// ─────────────────────────────────────────────
+//  OSM Overpass fetch  (fully instrumented)
 // ─────────────────────────────────────────────
 async function fetchPlaces(lat, lon){
-  // FIX: guard against null GPS — would silently query (null,null)
   if(lat == null || lon == null){
     statusPill.textContent = 'Waiting for GPS…';
+    dbg('GPS null — aborting fetch');
     return;
   }
 
+  dbg('fetch lat=' + lat.toFixed(5) + ' lon=' + lon.toFixed(5) + ' r=' + MAX_DIST + 'm');
   loadOverlay.classList.add('active');
   statusPill.textContent = 'Loading places…';
 
-  const query = `
-    [out:json][timeout:20];
-    (
-      node["amenity"~"restaurant|cafe|fast_food|bar"](around:${MAX_DIST},${lat},${lon});
-      way["amenity"~"restaurant|cafe|fast_food|bar"](around:${MAX_DIST},${lat},${lon});
-    );
-    out center tags;
-  `;
+  const query = '[out:json][timeout:25];(node["amenity"~"restaurant|cafe|fast_food|bar"](around:' + MAX_DIST + ',' + lat + ',' + lon + ');way["amenity"~"restaurant|cafe|fast_food|bar"](around:' + MAX_DIST + ',' + lat + ',' + lon + '););out center tags;';
   const body = 'data=' + encodeURIComponent(query);
 
   let data = null;
   let lastError = '';
 
-  // FIX: try each mirror in order until one succeeds
   for(let i = 0; i < OVERPASS_MIRRORS.length; i++){
     const mirror = OVERPASS_MIRRORS[i];
-    statusPill.textContent = `Loading… (server ${i+1}/${OVERPASS_MIRRORS.length})`;
+    const host = mirror.replace('https://','').split('/')[0];
+    statusPill.textContent = 'Server ' + (i+1) + '/' + OVERPASS_MIRRORS.length + '…';
+    dbg('Trying ' + host);
     try {
       const res = await fetch(mirror, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body,
-        signal: AbortSignal.timeout(18000), // 18s per mirror
+        signal: AbortSignal.timeout(20000),
       });
-      if(!res.ok) throw new Error(`HTTP ${res.status}`);
-      data = await res.json();
-      if(data && Array.isArray(data.elements)) break; // success
-      throw new Error('Bad response shape');
+      dbg('HTTP ' + res.status + ' from ' + host);
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      const text = await res.text();
+      dbg('Body ' + text.length + ' chars');
+      if(text.length < 10) throw new Error('Empty body');
+      data = JSON.parse(text);
+      dbg('elements=' + (data.elements ? data.elements.length : 'missing'));
+      if(data && Array.isArray(data.elements)) break;
+      throw new Error('No elements array');
     } catch(e){
       lastError = e.message;
-      console.warn(`Overpass mirror ${i+1} failed:`, e.message);
+      dbg('FAIL: ' + e.message);
     }
   }
 
   if(!data || !Array.isArray(data.elements)){
-    statusPill.textContent = '⚠️ Load failed — tap Refresh';
-    showErrorToast(`Could not reach OSM servers (${lastError}). Check connection & tap Refresh.`);
+    statusPill.textContent = '⚠️ All servers failed — tap Refresh';
+    showErrorToast('All OSM servers failed. Last: ' + lastError);
+    dbg('All mirrors failed');
     loadOverlay.classList.remove('active');
     return;
   }
 
-  const parsed = data.elements
-    .map(el => {
-      const elLat = el.lat ?? el.center?.lat;
-      const elLon = el.lon ?? el.center?.lon;
-      if(elLat == null || elLon == null) return null;
-      return {
-        id: el.id,
-        osmType: el.type || 'node',
-        name: el.tags?.name || 'Unnamed Place',
-        lat: elLat, lon: elLon,
-        tags: el.tags || {},
-        dist: haversine(lat, lon, elLat, elLon),
-      };
-    })
-    .filter(Boolean)
-    .filter(p => p.dist <= MAX_DIST)
-    .sort((a,b) => a.dist - b.dist)
-    .slice(0, 60); // increased cap
+  dbg('Raw elements: ' + data.elements.length);
+  data.elements.slice(0,3).forEach(function(el,i){
+    dbg('  [' + i + '] ' + el.type + ' "' + (el.tags && el.tags.name || '?') + '" ' + (el.lat || (el.center && el.center.lat)));
+  });
 
-  state.places = parsed;
-  placeCount.textContent = parsed.length;
+  const mapped = data.elements.map(function(el){
+    const elLat = el.lat != null ? el.lat : (el.center && el.center.lat);
+    const elLon = el.lon != null ? el.lon : (el.center && el.center.lon);
+    if(elLat == null || elLon == null) return null;
+    return {
+      id: el.id, osmType: el.type || 'node',
+      name: (el.tags && el.tags.name) || 'Unnamed Place',
+      lat: elLat, lon: elLon,
+      tags: el.tags || {},
+      dist: haversine(lat, lon, elLat, elLon),
+    };
+  });
 
-  if(parsed.length === 0){
-    // FIX: give actionable feedback instead of silent "0"
-    statusPill.textContent = '0 places — try wider search';
-    showErrorToast(`No restaurants found within ${MAX_DIST/1000} km. OSM data may be sparse here. Tap Refresh to try a wider area.`);
+  const afterNull   = mapped.filter(Boolean);
+  const afterRadius = afterNull.filter(function(p){ return p.dist <= MAX_DIST; });
+  const sorted      = afterRadius.sort(function(a,b){ return a.dist - b.dist; }).slice(0, 60);
+
+  dbg('afterNull=' + afterNull.length + ' afterRadius=' + afterRadius.length + ' final=' + sorted.length);
+
+  if(afterNull.length > 0 && afterRadius.length === 0){
+    const cl = afterNull.sort(function(a,b){return a.dist-b.dist;})[0];
+    dbg('Closest filtered-out: "' + cl.name + '" ' + cl.dist.toFixed(0) + 'm');
+  }
+
+  state.places = sorted;
+  placeCount.textContent = sorted.length;
+
+  if(sorted.length === 0){
+    statusPill.textContent = '0 places — tap Refresh to widen';
+    showErrorToast('0 places within ' + (MAX_DIST/1000).toFixed(1) + ' km. See debug panel. Tap Refresh to widen search.');
   } else {
-    statusPill.textContent = `${parsed.length} places nearby`;
+    statusPill.textContent = sorted.length + ' places nearby';
     showCalibToast();
   }
 
@@ -734,6 +763,7 @@ function startGPS(){
         clearTimeout(timer);
         state.lat = pos.coords.latitude;
         state.lon = pos.coords.longitude;
+        dbg('GPS fix: ' + state.lat.toFixed(5) + ',' + state.lon.toFixed(5) + ' acc=' + (pos.coords.accuracy|0) + 'm');
         resolve(pos);
         // Watch for position updates; also recalculate dist on each update
         navigator.geolocation.watchPosition(pos2 => {
@@ -794,6 +824,8 @@ async function startReal(){
 
   state.ready = true;
   refreshBtn.style.display = 'flex';
+  document.getElementById('debug-toggle').style.display = 'block';
+  dbg('App ready. GPS: ' + (state.lat ? state.lat.toFixed(5)+','+state.lon.toFixed(5) : 'null'));
   requestAnimationFrame(renderLoop);
 }
 
@@ -818,6 +850,8 @@ function startDemo(){
   }, 50);
   state.ready = true;
   refreshBtn.style.display = 'flex';
+  document.getElementById('debug-toggle').style.display = 'block';
+  dbg('Demo mode ready');
   requestAnimationFrame(renderLoop);
 }
 
@@ -1115,6 +1149,17 @@ infoPanel.addEventListener('touchend', e => {
 // ─────────────────────────────────────────────
 document.getElementById('start-btn').addEventListener('click', startReal);
 document.getElementById('demo-btn').addEventListener('click', startDemo);
+
+// Debug toggle
+(function(){
+  const btn = document.getElementById('debug-toggle');
+  const panel = document.getElementById('debug-panel');
+  btn.addEventListener('click', function(){
+    const visible = panel.style.display !== 'none';
+    panel.style.display = visible ? 'none' : 'block';
+    btn.textContent = visible ? '\u{1F50D} Debug' : '\u274C Close';
+  });
+})();
 
 let currentRadius = MAX_DIST;
 refreshBtn.addEventListener('click', async () => {
