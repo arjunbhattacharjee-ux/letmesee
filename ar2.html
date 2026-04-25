@@ -401,8 +401,15 @@ const state = {
 
 // Low-pass filter alpha (higher = smoother but laggier)
 const SMOOTH = 0.12;
-const FOV_H  = 65;  // assumed horizontal FOV degrees (typical phone ~60-70)
-const MAX_DIST = 500; // meters radius for OSM query
+const FOV_H  = 65;   // assumed horizontal FOV degrees
+const MAX_DIST = 1500; // FIX: 500m too small for Fujairah/sparse cities — 1500m
+
+// Overpass mirrors — tried in order, first success wins
+const OVERPASS_MIRRORS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+];
 
 // ─────────────────────────────────────────────
 //  Utilities
@@ -485,59 +492,124 @@ window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
 // ─────────────────────────────────────────────
-//  OSM Overpass fetch
+//  OSM Overpass fetch  (mirror-retry + diagnostics)
 // ─────────────────────────────────────────────
 async function fetchPlaces(lat, lon){
+  // FIX: guard against null GPS — would silently query (null,null)
+  if(lat == null || lon == null){
+    statusPill.textContent = 'Waiting for GPS…';
+    return;
+  }
+
   loadOverlay.classList.add('active');
   statusPill.textContent = 'Loading places…';
 
-  const r = MAX_DIST;
-  // Query restaurants, cafes, fast food, bars
   const query = `
-    [out:json][timeout:15];
+    [out:json][timeout:20];
     (
-      node["amenity"~"restaurant|cafe|fast_food|bar"](around:${r},${lat},${lon});
-      way["amenity"~"restaurant|cafe|fast_food|bar"](around:${r},${lat},${lon});
+      node["amenity"~"restaurant|cafe|fast_food|bar"](around:${MAX_DIST},${lat},${lon});
+      way["amenity"~"restaurant|cafe|fast_food|bar"](around:${MAX_DIST},${lat},${lon});
     );
-    out center;
+    out center tags;
   `;
+  const body = 'data=' + encodeURIComponent(query);
 
-  try {
-    const res = await fetch('https://overpass-api.de/api/interpreter', {
-      method: 'POST',
-      body: 'data=' + encodeURIComponent(query)
-    });
-    const data = await res.json();
+  let data = null;
+  let lastError = '';
 
-    state.places = data.elements
-      .map(el => {
-        const elLat = el.lat ?? el.center?.lat;
-        const elLon = el.lon ?? el.center?.lon;
-        if(!elLat || !elLon) return null;
-        return {
-          id: el.id,
-          osmType: el.type || 'node',   // FIX BUG 3: preserve node/way/relation
-          name: el.tags?.name || 'Unnamed Place',
-          lat: elLat, lon: elLon,
-          tags: el.tags || {},
-          dist: haversine(lat, lon, elLat, elLon),
-        };
-      })
-      .filter(Boolean)
-      .filter(p => p.dist <= MAX_DIST)
-      .sort((a,b) => a.dist - b.dist)
-      .slice(0, 40); // cap at 40 places
+  // FIX: try each mirror in order until one succeeds
+  for(let i = 0; i < OVERPASS_MIRRORS.length; i++){
+    const mirror = OVERPASS_MIRRORS[i];
+    statusPill.textContent = `Loading… (server ${i+1}/${OVERPASS_MIRRORS.length})`;
+    try {
+      const res = await fetch(mirror, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body,
+        signal: AbortSignal.timeout(18000), // 18s per mirror
+      });
+      if(!res.ok) throw new Error(`HTTP ${res.status}`);
+      data = await res.json();
+      if(data && Array.isArray(data.elements)) break; // success
+      throw new Error('Bad response shape');
+    } catch(e){
+      lastError = e.message;
+      console.warn(`Overpass mirror ${i+1} failed:`, e.message);
+    }
+  }
 
-    placeCount.textContent = state.places.length;
-    statusPill.textContent = state.places.length > 0 ? 'Point & explore' : 'No places found';
+  if(!data || !Array.isArray(data.elements)){
+    statusPill.textContent = '⚠️ Load failed — tap Refresh';
+    showErrorToast(`Could not reach OSM servers (${lastError}). Check connection & tap Refresh.`);
+    loadOverlay.classList.remove('active');
+    return;
+  }
+
+  const parsed = data.elements
+    .map(el => {
+      const elLat = el.lat ?? el.center?.lat;
+      const elLon = el.lon ?? el.center?.lon;
+      if(elLat == null || elLon == null) return null;
+      return {
+        id: el.id,
+        osmType: el.type || 'node',
+        name: el.tags?.name || 'Unnamed Place',
+        lat: elLat, lon: elLon,
+        tags: el.tags || {},
+        dist: haversine(lat, lon, elLat, elLon),
+      };
+    })
+    .filter(Boolean)
+    .filter(p => p.dist <= MAX_DIST)
+    .sort((a,b) => a.dist - b.dist)
+    .slice(0, 60); // increased cap
+
+  state.places = parsed;
+  placeCount.textContent = parsed.length;
+
+  if(parsed.length === 0){
+    // FIX: give actionable feedback instead of silent "0"
+    statusPill.textContent = '0 places — try wider search';
+    showErrorToast(`No restaurants found within ${MAX_DIST/1000} km. OSM data may be sparse here. Tap Refresh to try a wider area.`);
+  } else {
+    statusPill.textContent = `${parsed.length} places nearby`;
     showCalibToast();
-
-  } catch(e) {
-    console.error(e);
-    statusPill.textContent = 'Failed to load – retry?';
   }
 
   loadOverlay.classList.remove('active');
+}
+
+// ─────────────────────────────────────────────
+//  Error toast (persists until dismissed)
+// ─────────────────────────────────────────────
+function showErrorToast(msg){
+  let t = document.getElementById('error-toast');
+  if(!t){
+    t = document.createElement('div');
+    t.id = 'error-toast';
+    t.style.cssText = `
+      position:fixed; bottom:110px; left:16px; right:16px;
+      background:rgba(255,59,48,0.92); color:#fff;
+      border-radius:14px; padding:12px 16px;
+      font-size:13px; line-height:1.5;
+      z-index:30; backdrop-filter:blur(8px);
+      display:flex; gap:12px; align-items:flex-start;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+    `;
+    document.body.appendChild(t);
+  }
+  t.innerHTML = '';
+  const txt = document.createElement('span');
+  txt.style.flex = '1';
+  txt.textContent = msg;
+  const x = document.createElement('span');
+  x.textContent = '✕';
+  x.style.cssText = 'cursor:pointer;opacity:0.7;flex-shrink:0;font-size:15px;';
+  x.onclick = () => t.remove();
+  t.appendChild(txt);
+  t.appendChild(x);
+  // Auto-dismiss after 8s
+  setTimeout(() => t?.remove(), 8000);
 }
 
 // ─────────────────────────────────────────────
@@ -1044,9 +1116,42 @@ infoPanel.addEventListener('touchend', e => {
 document.getElementById('start-btn').addEventListener('click', startReal);
 document.getElementById('demo-btn').addEventListener('click', startDemo);
 
+let currentRadius = MAX_DIST;
 refreshBtn.addEventListener('click', async () => {
   if(state.demoMode){ loadDemoPlaces(); return; }
-  if(state.lat) await fetchPlaces(state.lat, state.lon);
+  if(!state.lat){ statusPill.textContent = 'Still getting GPS…'; return; }
+
+  // FIX: if 0 results, progressively widen search on each refresh tap
+  if(state.places.length === 0 && currentRadius < 5000){
+    currentRadius = Math.min(currentRadius * 2, 5000);
+    statusPill.textContent = `Widening to ${(currentRadius/1000).toFixed(1)} km…`;
+    // Temporarily override MAX_DIST for this fetch
+    const origFilter = currentRadius;
+    const query = `[out:json][timeout:25];(node["amenity"~"restaurant|cafe|fast_food|bar"](around:${origFilter},${state.lat},${state.lon});way["amenity"~"restaurant|cafe|fast_food|bar"](around:${origFilter},${state.lat},${state.lon}););out center tags;`;
+    const body = 'data=' + encodeURIComponent(query);
+    loadOverlay.classList.add('active');
+    for(const mirror of OVERPASS_MIRRORS){
+      try {
+        const res = await fetch(mirror, { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body, signal: AbortSignal.timeout(22000) });
+        if(!res.ok) continue;
+        const data = await res.json();
+        if(!Array.isArray(data.elements)) continue;
+        state.places = data.elements.map(el => {
+          const elLat = el.lat ?? el.center?.lat;
+          const elLon = el.lon ?? el.center?.lon;
+          if(elLat==null||elLon==null) return null;
+          return { id:el.id, osmType:el.type||'node', name:el.tags?.name||'Unnamed Place', lat:elLat, lon:elLon, tags:el.tags||{}, dist:haversine(state.lat,state.lon,elLat,elLon) };
+        }).filter(Boolean).filter(p=>p.dist<=origFilter).sort((a,b)=>a.dist-b.dist).slice(0,60);
+        placeCount.textContent = state.places.length;
+        statusPill.textContent = state.places.length > 0 ? `${state.places.length} places (${(origFilter/1000).toFixed(1)} km)` : '0 places — try wider';
+        break;
+      } catch(e){ continue; }
+    }
+    loadOverlay.classList.remove('active');
+  } else {
+    currentRadius = MAX_DIST; // reset
+    await fetchPlaces(state.lat, state.lon);
+  }
 });
 
 // ─────────────────────────────────────────────
