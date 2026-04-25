@@ -397,8 +397,9 @@
 // ─────────────────────────────────────────────
 const state = {
   lat: null, lon: null,
-  heading: 0,        // smoothed compass heading (degrees, 0=N, CW)
+  heading: 0,
   rawHeading: 0,
+  headingReceived: false,   // true once compass fires at least once
   places: [],
   demoMode: false,
   ready: false,
@@ -602,6 +603,7 @@ async function fetchPlaces(lat, lon){
     showErrorToast('0 places within ' + (MAX_DIST/1000).toFixed(1) + ' km. See debug panel. Tap Refresh to widen search.');
   } else {
     statusPill.textContent = sorted.length + ' places nearby';
+    dbg('compass=' + (state.headingReceived ? 'OK heading='+state.heading.toFixed(1) : 'NOT RECEIVED — radar mode active'));
     showCalibToast();
   }
 
@@ -685,9 +687,17 @@ function handleOrientation(e){
   }
 
   state.heading = smoothAngle(state.heading, h, SMOOTH);
+  state.headingReceived = true;
 
-  // Update compass rose (needle points N, so rotate inverse of heading)
+  // Update compass rose
   compassSVG.style.transform = `rotate(${-state.heading}deg)`;
+
+  // Log heading to debug panel every 3s
+  const now2 = Date.now();
+  if(!state._lastHeadingLog || now2 - state._lastHeadingLog > 3000){
+    state._lastHeadingLog = now2;
+    dbg('heading=' + state.heading.toFixed(1) + '° raw=' + h.toFixed(1) + '°');
+  }
 }
 
 async function requestOrientationPermission(){
@@ -895,21 +905,38 @@ function renderLoop(){
   ctx.clearRect(0, 0, W(), H());
   frameDots = [];
 
+  // If compass has never fired, show a wide "radar" view so dots are visible
+  // regardless of heading — user can still tap them.
+  const compassReady = state.headingReceived;
   const heading = state.heading;
-  const halfFOV = FOV_H / 2;
+
+  // In radar mode use 360° FOV so ALL places render spread across the screen
+  const activeFOV = compassReady ? FOV_H : 360;
+  const halfFOV = activeFOV / 2;
   const cx = W() / 2;
   const cy = H() / 2;
+
+  // Show compass-unavailable hint
+  if(!compassReady && state.places.length > 0){
+    ctx.font = '500 13px DM Sans, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.fillText('Compass unavailable — showing all nearby places', cx, H() - 80);
+    ctx.fillText('Rotate phone to enable AR mode', cx, H() - 60);
+  }
 
   const now = Date.now();
 
   for(const place of state.places){
     if(!state.lat) break;
     const bear = bearing(state.lat, state.lon, place.lat, place.lon);
-    const diff = angleDiff(bear, heading); // positive = right
+    const diff = compassReady ? angleDiff(bear, heading) : angleDiff(bear, heading);
 
-    // Only render if within FOV (+ small buffer for smooth fade)
+    // In radar mode spread all places evenly across screen width
     const bufFOV = halfFOV + 8;
-    if(Math.abs(diff) > bufFOV) continue;
+    if(compassReady && Math.abs(diff) > bufFOV) continue;
+    // In radar mode: map full 360° to screen width
+    if(!compassReady && Math.abs(diff) > 180) continue;
 
     const x = cx + (diff / halfFOV) * cx;
 
