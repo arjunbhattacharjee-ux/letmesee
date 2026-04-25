@@ -741,65 +741,86 @@ async function startCamera(){
 }
 
 // ─────────────────────────────────────────────
-//  Geolocation
+//  Geolocation — non-blocking, retries forever
+//  The app starts immediately; GPS resolves in
+//  the background and triggers fetchPlaces when
+//  a fix arrives. No timeout kills the attempt.
 // ─────────────────────────────────────────────
-function startGPS(){
-  return new Promise((resolve, reject) => {
-    if(!navigator.geolocation){ reject('No geolocation'); return; }
+let gpsWatchId = null;
+let gpsFetched = false; // fetchPlaces called once per fix
 
-    // FIX WARN: show timeout countdown and fall back gracefully after 12s
-    let settled = false;
-    const timer = setTimeout(() => {
-      if(!settled){
-        settled = true;
-        reject(new Error('GPS timed out after 12s'));
+function startGPSWatch(){
+  if(!navigator.geolocation){
+    dbg('ERROR: navigator.geolocation not available');
+    statusPill.textContent = 'GPS not available on this device';
+    return;
+  }
+
+  dbg('Starting GPS watch (high accuracy)…');
+
+  // Show a pulsing GPS indicator while waiting
+  let dots = 0;
+  const gpsTimer = setInterval(() => {
+    if(state.lat !== null){ clearInterval(gpsTimer); return; }
+    dots = (dots + 1) % 4;
+    statusPill.textContent = 'Waiting for GPS' + '.'.repeat(dots + 1);
+  }, 600);
+
+  // watchPosition — fires as soon as ANY fix is available,
+  // then keeps updating. No custom timeout = browser keeps trying.
+  gpsWatchId = navigator.geolocation.watchPosition(
+    pos => {
+      clearInterval(gpsTimer);
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+      const acc = Math.round(pos.coords.accuracy);
+      dbg('GPS fix: ' + lat.toFixed(5) + ',' + lon.toFixed(5) + ' acc=' + acc + 'm');
+
+      state.lat = lat;
+      state.lon = lon;
+
+      // Recalculate live distances for already-loaded places
+      state.places.forEach(p => {
+        p.dist = haversine(state.lat, state.lon, p.lat, p.lon);
+      });
+
+      // Fetch places on first fix, or if user moved >200m
+      if(!gpsFetched){
+        gpsFetched = true;
+        fetchPlaces(lat, lon);
       }
-    }, 12000);
+    },
+    err => {
+      // Log the real error code so we can see it in debug panel
+      const codes = {1:'PERMISSION_DENIED', 2:'POSITION_UNAVAILABLE', 3:'TIMEOUT'};
+      const msg = codes[err.code] || ('ERR_' + err.code);
+      dbg('GPS error: ' + msg + ' — ' + err.message);
 
-    navigator.geolocation.getCurrentPosition(
-      pos => {
-        if(settled) return;
-        settled = true;
-        clearTimeout(timer);
-        state.lat = pos.coords.latitude;
-        state.lon = pos.coords.longitude;
-        dbg('GPS fix: ' + state.lat.toFixed(5) + ',' + state.lon.toFixed(5) + ' acc=' + (pos.coords.accuracy|0) + 'm');
-        resolve(pos);
-        // Watch for position updates; also recalculate dist on each update
-        navigator.geolocation.watchPosition(pos2 => {
-          state.lat = pos2.coords.latitude;
-          state.lon = pos2.coords.longitude;
-          // FIX WARN: keep distances live as user moves
-          state.places.forEach(p => {
-            p.dist = haversine(state.lat, state.lon, p.lat, p.lon);
-          });
-        }, null, { enableHighAccuracy: true, maximumAge: 3000 });
-      },
-      err => {
-        if(settled) return;
-        settled = true;
-        clearTimeout(timer);
-        reject(err);
-      },
-      { enableHighAccuracy: true, timeout: 11000 }
-    );
-  });
+      if(err.code === 1){
+        // Permission denied — no point retrying
+        clearInterval(gpsTimer);
+        statusPill.textContent = '📍 Location access denied';
+        showErrorToast('Location permission denied. Enable it in browser/device settings and reload.');
+      }
+      // For POSITION_UNAVAILABLE or TIMEOUT, watchPosition auto-retries — do nothing
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 30000,      // 30s per attempt before firing error callback
+      maximumAge: 0        // never use a cached position
+    }
+  );
 }
 
 // ─────────────────────────────────────────────
 //  Start real mode
 // ─────────────────────────────────────────────
 async function startReal(){
-  // FIX WARN: enforce HTTPS before attempting any sensor APIs
   if(location.protocol !== 'https:' && location.hostname !== 'localhost'){
     splash.style.display = 'none';
     const msg = document.createElement('div');
     msg.style.cssText = 'position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:40px;text-align:center;background:#0a0a0c;z-index:200;';
-    msg.innerHTML = `<div style="font-size:40px">🔒</div>
-      <div style="font-size:18px;font-weight:600">HTTPS required</div>
-      <div style="font-size:14px;color:rgba(255,255,255,0.5);max-width:280px">
-        Camera, GPS, and compass only work on secure (HTTPS) connections. Please deploy to an HTTPS host.
-      </div>`;
+    msg.innerHTML = '<div style="font-size:40px">\u{1F512}</div><div style="font-size:18px;font-weight:600">HTTPS required</div><div style="font-size:14px;color:rgba(255,255,255,0.5);max-width:280px">Camera, GPS, and compass only work on secure (HTTPS) connections.</div>';
     document.body.appendChild(msg);
     return;
   }
@@ -807,26 +828,21 @@ async function startReal(){
   splash.style.display = 'none';
   statusPill.textContent = 'Requesting camera…';
 
-  // All in parallel where possible
+  // Start camera + compass in parallel, then GPS in background
   await Promise.all([
     startCamera(),
     requestOrientationPermission()
   ]);
 
-  statusPill.textContent = 'Getting location…';
-  try {
-    await startGPS();
-    await fetchPlaces(state.lat, state.lon);
-  } catch(e){
-    statusPill.textContent = 'Location failed – GPS required';
-    console.error(e);
-  }
-
+  // App is ready to render immediately — GPS arrives async
   state.ready = true;
   refreshBtn.style.display = 'flex';
   document.getElementById('debug-toggle').style.display = 'block';
-  dbg('App ready. GPS: ' + (state.lat ? state.lat.toFixed(5)+','+state.lon.toFixed(5) : 'null'));
   requestAnimationFrame(renderLoop);
+
+  // Start GPS watch — non-blocking, calls fetchPlaces when fix arrives
+  startGPSWatch();
+  dbg('App ready. Waiting for GPS fix…');
 }
 
 // ─────────────────────────────────────────────
@@ -1164,7 +1180,8 @@ document.getElementById('demo-btn').addEventListener('click', startDemo);
 let currentRadius = MAX_DIST;
 refreshBtn.addEventListener('click', async () => {
   if(state.demoMode){ loadDemoPlaces(); return; }
-  if(!state.lat){ statusPill.textContent = 'Still getting GPS…'; return; }
+  if(!state.lat){ statusPill.textContent = 'Still waiting for GPS…'; dbg('Refresh tapped but GPS still null'); return; }
+  gpsFetched = true; // already fetched once, reset handled below
 
   // FIX: if 0 results, progressively widen search on each refresh tap
   if(state.places.length === 0 && currentRadius < 5000){
