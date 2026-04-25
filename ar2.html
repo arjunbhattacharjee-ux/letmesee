@@ -416,6 +416,7 @@ const OVERPASS_MIRRORS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
   'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+  'https://overpass.openstreetmap.ru/api/interpreter',
 ];
 
 // ─────────────────────────────────────────────
@@ -700,9 +701,14 @@ function handleOrientation(e){
   } else {
     // Only smooth if heading actually changed (reject duplicate 0,0,0 spam)
     if(lastRealHeading === null || Math.abs(angleDiff(h, lastRealHeading)) > 0.3){
+      // For large heading jumps (>60°), snap halfway immediately to avoid
+      // the compass "spinning the long way round" artefact seen in the debug log
+      // (e.g. raw jumps 271° → 93.5° in one event).
+      const jump = Math.abs(angleDiff(h, state.heading));
+      const alpha = jump > 60 ? 0.6 : 0.25;
+      if(jump > 60) dbg('compass jump ' + jump.toFixed(0) + '° → snap (alpha=0.6)');
       lastRealHeading = h;
-      // Use faster alpha so UI tracks phone rotation without lag
-      state.heading = smoothAngle(state.heading, h, 0.25);
+      state.heading = smoothAngle(state.heading, h, alpha);
     }
   }
 
@@ -790,6 +796,8 @@ async function startCamera(){
 // ─────────────────────────────────────────────
 let gpsWatchId = null;
 let gpsFetched = false; // fetchPlaces called once per fix
+let gpsRetryTimer = null;
+let gpsWatchActive = false;
 
 function startGPSWatch(){
   if(!navigator.geolocation){
@@ -798,6 +806,8 @@ function startGPSWatch(){
     return;
   }
 
+  if(gpsWatchActive) return; // already watching
+  gpsWatchActive = true;
   dbg('Starting GPS watch (high accuracy)…');
 
   // Show a pulsing GPS indicator while waiting
@@ -808,50 +818,100 @@ function startGPSWatch(){
     statusPill.textContent = 'Waiting for GPS' + '.'.repeat(dots + 1);
   }, 600);
 
-  // watchPosition — fires as soon as ANY fix is available,
-  // then keeps updating. No custom timeout = browser keeps trying.
-  gpsWatchId = navigator.geolocation.watchPosition(
-    pos => {
-      clearInterval(gpsTimer);
-      const lat = pos.coords.latitude;
-      const lon = pos.coords.longitude;
-      const acc = Math.round(pos.coords.accuracy);
-      dbg('GPS fix: ' + lat.toFixed(5) + ',' + lon.toFixed(5) + ' acc=' + acc + 'm');
-
-      state.lat = lat;
-      state.lon = lon;
-
-      // Recalculate live distances for already-loaded places
-      state.places.forEach(p => {
-        p.dist = haversine(state.lat, state.lon, p.lat, p.lon);
-      });
-
-      // Fetch places on first fix, or if user moved >200m
-      if(!gpsFetched){
-        gpsFetched = true;
-        fetchPlaces(lat, lon);
-      }
-    },
-    err => {
-      // Log the real error code so we can see it in debug panel
-      const codes = {1:'PERMISSION_DENIED', 2:'POSITION_UNAVAILABLE', 3:'TIMEOUT'};
-      const msg = codes[err.code] || ('ERR_' + err.code);
-      dbg('GPS error: ' + msg + ' — ' + err.message);
-
-      if(err.code === 1){
-        // Permission denied — no point retrying
-        clearInterval(gpsTimer);
-        statusPill.textContent = '📍 Location access denied';
-        showErrorToast('Location permission denied. Enable it in browser/device settings and reload.');
-      }
-      // For POSITION_UNAVAILABLE or TIMEOUT, watchPosition auto-retries — do nothing
-    },
-    {
-      enableHighAccuracy: true,
-      timeout: 30000,      // 30s per attempt before firing error callback
-      maximumAge: 0        // never use a cached position
+  function doWatch(){
+    // Clear any previous watch before re-registering
+    if(gpsWatchId !== null){
+      navigator.geolocation.clearWatch(gpsWatchId);
+      gpsWatchId = null;
     }
-  );
+
+    // IMPORTANT: No custom `timeout` in options.
+    // On iOS, setting timeout on watchPosition causes spurious POSITION_UNAVAILABLE
+    // errors even immediately after a valid fix. Let the browser manage timing.
+    gpsWatchId = navigator.geolocation.watchPosition(
+      pos => {
+        clearInterval(gpsTimer);
+        if(gpsRetryTimer){ clearTimeout(gpsRetryTimer); gpsRetryTimer = null; }
+
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+        const acc = Math.round(pos.coords.accuracy);
+        dbg('GPS fix: ' + lat.toFixed(5) + ',' + lon.toFixed(5) + ' acc=' + acc + 'm');
+
+        state.lat = lat;
+        state.lon = lon;
+
+        // Recalculate live distances for already-loaded places
+        state.places.forEach(p => {
+          p.dist = haversine(state.lat, state.lon, p.lat, p.lon);
+        });
+
+        // Fetch places on first fix
+        if(!gpsFetched){
+          gpsFetched = true;
+          fetchPlaces(lat, lon);
+        }
+      },
+      err => {
+        // Log the real error code so we can see it in debug panel
+        const codes = {1:'PERMISSION_DENIED', 2:'POSITION_UNAVAILABLE', 3:'TIMEOUT'};
+        const msg = codes[err.code] || ('ERR_' + err.code);
+        dbg('GPS error: ' + msg + ' — ' + err.message);
+
+        if(err.code === 1){
+          // Permission denied — no point retrying
+          clearInterval(gpsTimer);
+          gpsWatchActive = false;
+          statusPill.textContent = '📍 Location access denied';
+          showErrorToast('Location permission denied. Enable it in browser/device settings and reload.');
+          return;
+        }
+
+        // POSITION_UNAVAILABLE (code 2) on iOS: watchPosition sometimes fires this
+        // even after returning a valid fix (kCLErrorDomain error 0). The fix is to
+        // clear the watch and restart it after a short delay.
+        if(err.code === 2){
+          dbg('GPS POSITION_UNAVAILABLE — restarting watch in 3s…');
+          if(gpsWatchId !== null){
+            navigator.geolocation.clearWatch(gpsWatchId);
+            gpsWatchId = null;
+          }
+          gpsWatchActive = false;
+          // Only show error to user if we haven't gotten a fix yet
+          if(state.lat === null){
+            statusPill.textContent = 'GPS signal lost — retrying…';
+          }
+          gpsRetryTimer = setTimeout(() => {
+            gpsWatchActive = false;
+            startGPSWatch();
+          }, 3000);
+          return;
+        }
+
+        // TIMEOUT (code 3): simply retry immediately — browser may have given up too soon
+        if(err.code === 3){
+          dbg('GPS TIMEOUT — restarting watch…');
+          if(gpsWatchId !== null){
+            navigator.geolocation.clearWatch(gpsWatchId);
+            gpsWatchId = null;
+          }
+          gpsWatchActive = false;
+          gpsRetryTimer = setTimeout(() => {
+            gpsWatchActive = false;
+            startGPSWatch();
+          }, 1000);
+        }
+      },
+      {
+        enableHighAccuracy: true,
+        // No timeout: avoids spurious POSITION_UNAVAILABLE on iOS immediately
+        // after a valid fix (kCLErrorDomain error 0 / error 1).
+        maximumAge: 0        // never use a cached position
+      }
+    );
+  }
+
+  doWatch();
 }
 
 // ─────────────────────────────────────────────
