@@ -1036,79 +1036,66 @@ function renderLoop(){
     const distFactor = Math.max(0, 1 - place.dist / MAX_DIST);
     const y = H() * 0.42 + (1 - distFactor) * H() * 0.08;
 
-    // Size: closer = bigger
-    const baseSize = 10 + distFactor * 16;
+    // Size: closer = bigger, kept compact
+    const baseSize = 6 + distFactor * 8;  // range 6–14px radius
 
     // Edge fade
     const edgeFade = Math.max(0, 1 - Math.abs(diff) / bufFOV);
-    const alpha = edgeFade * (0.5 + distFactor * 0.5);
+    const alpha = edgeFade * (0.75 + distFactor * 0.25);
 
-    // Animated pulse for closest 3
+    // Subtle pulse only for the single closest place
     const rank = state.places.indexOf(place);
-    const pulse = rank < 3 ? 1 + 0.18 * Math.sin(now / 600 + rank * 2.1) : 1;
+    const pulse = rank === 0 ? 1 + 0.12 * Math.sin(now / 700) : 1;
     const r = baseSize * pulse;
 
-    // Determine color by amenity
-    let dotColor, ringColor;
+    // Determine solid color by amenity
+    let dotColor;
     const a = place.tags.amenity;
-    if(a === 'cafe'){
-      dotColor = `rgba(255,159,10,${alpha})`;
-      ringColor = `rgba(255,159,10,${alpha*0.35})`;
-    } else if(a === 'fast_food'){
-      dotColor = `rgba(255,69,58,${alpha})`;
-      ringColor = `rgba(255,69,58,${alpha*0.35})`;
-    } else if(a === 'bar'){
-      dotColor = `rgba(48,209,88,${alpha})`;
-      ringColor = `rgba(48,209,88,${alpha*0.35})`;
-    } else {
-      dotColor = `rgba(255,59,48,${alpha})`;
-      ringColor = `rgba(255,59,48,${alpha*0.35})`;
-    }
+    if(a === 'cafe')           dotColor = `rgba(255,159,10,${alpha})`;
+    else if(a === 'fast_food') dotColor = `rgba(255,69,58,${alpha})`;
+    else if(a === 'bar')       dotColor = `rgba(48,209,88,${alpha})`;
+    else                       dotColor = `rgba(255,59,48,${alpha})`;
 
-    // Outer glow ring
-    ctx.beginPath();
-    ctx.arc(x, y, r + 8, 0, Math.PI * 2);
-    ctx.fillStyle = ringColor;
-    ctx.fill();
-
-    // Main dot
+    // Solid filled dot
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fillStyle = dotColor;
     ctx.fill();
 
-    // White inner highlight
+    // Thin white border so dot reads against any background
     ctx.beginPath();
-    ctx.arc(x - r*0.25, y - r*0.25, r * 0.3, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(255,255,255,${alpha * 0.5})`;
-    ctx.fill();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(255,255,255,${alpha * 0.6})`;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
 
-    // Distance label
-    if(distFactor > 0.3){
-      const labelAlpha = edgeFade * Math.min(1, (distFactor - 0.3) / 0.3);
-      ctx.font = `600 11px 'DM Sans', sans-serif`;
+    // Name label — always above the dot
+    {
+      ctx.font = `600 12px 'DM Sans', sans-serif`;
       ctx.textAlign = 'center';
-      ctx.fillStyle = `rgba(255,255,255,${labelAlpha * 0.9})`;
-      ctx.fillText(formatDist(place.dist), x, y + r + 16);
-    }
+      const nameW = ctx.measureText(place.name).width + 14;
+      const nameY = y - r - 8;
 
-    // Name label for closest / large dots
-    if(r > 18 && edgeFade > 0.5){
-      const nameAlpha = edgeFade * Math.min(1, (r-18)/8);
-      ctx.font = `500 13px 'DM Sans', sans-serif`;
-      ctx.textAlign = 'center';
-      // Background pill
-      const nameW = ctx.measureText(place.name).width + 16;
-      const nameY = y - r - 22;
+      // Dark pill background
       ctx.beginPath();
-      ctx.roundRect(x - nameW/2, nameY - 11, nameW, 20, 10);
-      ctx.fillStyle = `rgba(10,10,12,${nameAlpha * 0.75})`;
+      ctx.roundRect(x - nameW/2, nameY - 14, nameW, 18, 9);
+      ctx.fillStyle = `rgba(0,0,0,${edgeFade * 0.68})`;
       ctx.fill();
-      ctx.fillStyle = `rgba(255,255,255,${nameAlpha})`;
-      ctx.fillText(place.name, x, nameY + 4);
+
+      // Name text
+      ctx.fillStyle = `rgba(255,255,255,${edgeFade * alpha})`;
+      ctx.fillText(place.name, x, nameY);
     }
 
-    frameDots.push({ place, x, y, r: r + 14 });
+    // Distance label — always below the dot
+    {
+      ctx.font = `500 10px 'DM Sans', sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = `rgba(255,255,255,${edgeFade * alpha * 0.8})`;
+      ctx.fillText(formatDist(place.dist), x, y + r + 13);
+    }
+
+    frameDots.push({ place, x, y, r: r + 16 });
   }
 
   // Rebuild hit targets
