@@ -498,11 +498,15 @@ const refreshBtn = document.getElementById('refresh-btn');
 // ─────────────────────────────────────────────
 //  Canvas sizing
 // ─────────────────────────────────────────────
+let _resizeTimer = null;
 function resizeCanvas(){
   canvas.width  = window.innerWidth;
   canvas.height = window.innerHeight;
 }
-window.addEventListener('resize', resizeCanvas);
+window.addEventListener('resize', () => {
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(resizeCanvas, 80);
+});
 resizeCanvas();
 
 // ─────────────────────────────────────────────
@@ -521,130 +525,174 @@ function dbg(msg){
 // ─────────────────────────────────────────────
 //  OSM Overpass fetch  (fully instrumented)
 // ─────────────────────────────────────────────
+let fetchInFlight = false;   // guard against concurrent fetches
+let fetchRetryTimer = null;  // handle for the auto-retry setTimeout
+
 async function fetchPlaces(lat, lon){
   if(lat == null || lon == null){
     statusPill.textContent = 'Waiting for GPS…';
     dbg('GPS null — aborting fetch');
     return;
   }
+  if(fetchInFlight){
+    dbg('fetchPlaces: already in flight — skipping duplicate call');
+    return;
+  }
+  fetchInFlight = true;
 
-  // ── sessionStorage cache (keyed to 0.01° grid ≈ 1 km) ──
-  const cacheKey = 'arplaces_' + lat.toFixed(2) + '_' + lon.toFixed(2);
+  // ── sessionStorage cache ──
+  // Key to ~300m grid. Also bust cache if user has moved >300m since last fetch.
+  const cacheKey = 'arplaces_' + lat.toFixed(3) + '_' + lon.toFixed(3);
+  const cacheMetaKey = 'arplaces_meta';
   try {
     const cached = sessionStorage.getItem(cacheKey);
-    if(cached){
+    const meta   = JSON.parse(sessionStorage.getItem(cacheMetaKey) || '{}');
+    const ageSec = meta.ts ? (Date.now() - meta.ts) / 1000 : 9999;
+    const movedM = (meta.lat != null && meta.lon != null)
+      ? haversine(lat, lon, meta.lat, meta.lon) : 0;
+
+    if(cached && ageSec < 300 && movedM < 300){
       const parsed = JSON.parse(cached);
       if(Array.isArray(parsed) && parsed.length > 0){
         state.places = parsed.map(p => ({ ...p, dist: haversine(lat, lon, p.lat, p.lon) }));
         placeCount.textContent = state.places.length;
         statusPill.textContent = state.places.length + ' places nearby (cached)';
-        dbg('Cache hit — ' + state.places.length + ' places, skipping network');
+        dbg('Cache hit — ' + state.places.length + ' places, age=' + Math.round(ageSec) + 's moved=' + Math.round(movedM) + 'm');
+        fetchFailed = false;
+        fetchInFlight = false;
         showCalibToast();
         return;
       }
+    } else if(cached){
+      dbg('Cache stale — age=' + Math.round(ageSec) + 's moved=' + Math.round(movedM) + 'm — fetching fresh');
     }
   } catch(e){ dbg('Cache read error: ' + e.message); }
 
   dbg('fetch lat=' + lat.toFixed(5) + ' lon=' + lon.toFixed(5) + ' r=' + MAX_DIST + 'm');
-  // No full-screen overlay — show progress inline in the status pill so the
-  // user can see what's happening and still tap Refresh at any time.
   loadOverlay.classList.remove('active');
+
+  // Cancel any pending auto-retry — this fetch supersedes it
+  if(fetchRetryTimer !== null){ clearTimeout(fetchRetryTimer); fetchRetryTimer = null; }
 
   const query = '[out:json][timeout:30];(node["amenity"~"restaurant|cafe|fast_food|bar"](around:' + MAX_DIST + ',' + lat + ',' + lon + ');way["amenity"~"restaurant|cafe|fast_food|bar"](around:' + MAX_DIST + ',' + lat + ',' + lon + '););out center tags;';
   const body = 'data=' + encodeURIComponent(query);
 
   let data = null;
-  let lastError = '';
 
-  for(let i = 0; i < OVERPASS_MIRRORS.length; i++){
-    const mirror = OVERPASS_MIRRORS[i];
-    const host = mirror.replace('https://','').split('/')[0];
-    statusPill.textContent = '⏳ Searching ' + (i+1) + '/' + OVERPASS_MIRRORS.length + '…';
-    dbg('Trying ' + host);
-    const t0 = Date.now();
-    try {
-      const res = await fetch(mirror, {
+  try {
+    // ── Race all mirrors in parallel — fastest response wins ──
+    // Each mirror gets its own AbortController so losers are cancelled immediately.
+    statusPill.textContent = '⏳ Searching nearby places…';
+    const controllers = OVERPASS_MIRRORS.map(() => new AbortController());
+
+    const mirrorFetch = (mirror, ctrl, idx) => {
+      const host = mirror.replace('https://','').split('/')[0];
+      const t0 = Date.now();
+      // Individual timeout per mirror
+      const timer = setTimeout(() => ctrl.abort(), 25000);
+      return fetch(mirror, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body,
-        signal: AbortSignal.timeout(30000),
+        signal: ctrl.signal,
+      }).then(async res => {
+        clearTimeout(timer);
+        const elapsed = Date.now() - t0;
+        if(!res.ok) throw new Error('HTTP ' + res.status + ' from ' + host);
+        const text = await res.text();
+        if(text.length < 10) throw new Error('Empty body from ' + host);
+        const parsed = JSON.parse(text);
+        if(!parsed || !Array.isArray(parsed.elements)) throw new Error('No elements from ' + host);
+        dbg('✓ ' + host + ' responded in ' + elapsed + 'ms (' + parsed.elements.length + ' elements)');
+        return parsed;
+      }).catch(e => {
+        clearTimeout(timer);
+        const elapsed = Date.now() - t0;
+        const tag = elapsed < INSTANT_FAIL_MS ? 'BLOCKED' : 'SLOW/ERR';
+        dbg('✗ ' + host + ' [' + tag + ' ' + elapsed + 'ms]: ' + e.message);
+        throw e;
       });
-      dbg('HTTP ' + res.status + ' from ' + host + ' (' + (Date.now()-t0) + 'ms)');
-      if(!res.ok) throw new Error('HTTP ' + res.status);
-      const text = await res.text();
-      dbg('Body ' + text.length + ' chars');
-      if(text.length < 10) throw new Error('Empty body');
-      data = JSON.parse(text);
-      dbg('elements=' + (data.elements ? data.elements.length : 'missing'));
-      if(data && Array.isArray(data.elements)) break;
-      throw new Error('No elements array');
-    } catch(e){
-      const elapsed = Date.now() - t0;
-      const reason = elapsed < INSTANT_FAIL_MS ? 'BLOCKED' : 'TIMEOUT/ERR';
-      lastError = e.message;
-      dbg('FAIL [' + reason + ' ' + elapsed + 'ms]: ' + host + ' — ' + e.message);
-    }
-  }
-
-  if(!data || !Array.isArray(data.elements)){
-    statusPill.textContent = '⚠️ No server responded';
-    showErrorToast('All OSM servers failed (' + lastError + '). Retrying in 15s — or tap Refresh now.');
-    dbg('All mirrors failed — auto-retry in 15s');
-    fetchFailed = true;
-    setTimeout(() => {
-      if(state.lat !== null && !state.demoMode){
-        dbg('Auto-retry fetch after server failure');
-        fetchPlaces(state.lat, state.lon);
-      }
-    }, 15000);
-    return;
-  }
-
-  dbg('Raw elements: ' + data.elements.length);
-  data.elements.slice(0,3).forEach(function(el,i){
-    dbg('  [' + i + '] ' + el.type + ' "' + (el.tags && el.tags.name || '?') + '" ' + (el.lat || (el.center && el.center.lat)));
-  });
-
-  const mapped = data.elements.map(function(el){
-    const elLat = el.lat != null ? el.lat : (el.center && el.center.lat);
-    const elLon = el.lon != null ? el.lon : (el.center && el.center.lon);
-    if(elLat == null || elLon == null) return null;
-    return {
-      id: el.id, osmType: el.type || 'node',
-      name: (el.tags && el.tags.name) || 'Unnamed Place',
-      lat: elLat, lon: elLon,
-      tags: el.tags || {},
-      dist: haversine(lat, lon, elLat, elLon),
     };
-  });
 
-  const afterNull   = mapped.filter(Boolean);
-  const afterRadius = afterNull.filter(function(p){ return p.dist <= MAX_DIST; });
-  const sorted      = afterRadius.sort(function(a,b){ return a.dist - b.dist; }).slice(0, 60);
+    try {
+      data = await Promise.any(
+        OVERPASS_MIRRORS.map((m, i) => mirrorFetch(m, controllers[i], i))
+      );
+      // Cancel any still-running mirror requests
+      controllers.forEach(c => { try{ c.abort(); }catch(_){} });
+    } catch(aggErr){
+      // AggregateError — all mirrors failed
+      controllers.forEach(c => { try{ c.abort(); }catch(_){} });
+    }
 
-  dbg('afterNull=' + afterNull.length + ' afterRadius=' + afterRadius.length + ' final=' + sorted.length);
+    if(!data || !Array.isArray(data.elements)){
+      statusPill.textContent = '⚠️ No server responded';
+      showErrorToast('All OSM servers unreachable. Retrying in 20s — or tap Refresh now.');
+      dbg('All mirrors failed — auto-retry in 20s');
+      fetchFailed = true;
+      fetchRetryTimer = setTimeout(() => {
+        fetchRetryTimer = null;
+        if(state.lat !== null && !state.demoMode){
+          dbg('Auto-retry after all-mirror failure');
+          fetchPlaces(state.lat, state.lon);
+        }
+      }, 20000);
+      return;
+    }
 
-  if(afterNull.length > 0 && afterRadius.length === 0){
-    const cl = afterNull.sort(function(a,b){return a.dist-b.dist;})[0];
-    dbg('Closest filtered-out: "' + cl.name + '" ' + cl.dist.toFixed(0) + 'm');
-  }
+    dbg('Raw elements: ' + data.elements.length);
+    data.elements.slice(0,3).forEach(function(el,i){
+      dbg('  [' + i + '] ' + el.type + ' "' + (el.tags && el.tags.name || '?') + '" ' + (el.lat || (el.center && el.center.lat)));
+    });
 
-  state.places = sorted;
-  placeCount.textContent = sorted.length;
+    const mapped = data.elements.map(function(el){
+      const elLat = el.lat != null ? el.lat : (el.center && el.center.lat);
+      const elLon = el.lon != null ? el.lon : (el.center && el.center.lon);
+      if(elLat == null || elLon == null) return null;
+      return {
+        id: el.id, osmType: el.type || 'node',
+        name: (el.tags && el.tags.name) || 'Unnamed Place',
+        lat: elLat, lon: elLon,
+        tags: el.tags || {},
+        dist: haversine(lat, lon, elLat, elLon),
+      };
+    });
 
-  // ── Write to cache so next load is instant ──
-  if(sorted.length > 0){
-    try { sessionStorage.setItem(cacheKey, JSON.stringify(sorted)); }
-    catch(e){ dbg('Cache write error: ' + e.message); }
-  }
+    const afterNull   = mapped.filter(Boolean);
+    const afterRadius = afterNull.filter(function(p){ return p.dist <= MAX_DIST; });
+    const sorted      = afterRadius.sort(function(a,b){ return a.dist - b.dist; }).slice(0, 60);
 
-  if(sorted.length === 0){
-    statusPill.textContent = '0 places — tap Refresh to widen';
-    showErrorToast('0 places within ' + (MAX_DIST/1000).toFixed(1) + ' km. See debug panel. Tap Refresh to widen search.');
-  } else {
-    statusPill.textContent = sorted.length + ' places nearby';
-    dbg('compass=' + (state.headingReceived ? 'OK heading='+state.heading.toFixed(1) : 'NOT RECEIVED — radar mode active'));
-    showCalibToast();
+    dbg('afterNull=' + afterNull.length + ' afterRadius=' + afterRadius.length + ' final=' + sorted.length);
+
+    if(afterNull.length > 0 && afterRadius.length === 0){
+      const cl = afterNull.sort(function(a,b){return a.dist-b.dist;})[0];
+      dbg('Closest filtered-out: "' + cl.name + '" ' + cl.dist.toFixed(0) + 'm');
+    }
+
+    state.places = sorted;
+    placeCount.textContent = sorted.length;
+    fetchFailed = false;          // Fix 7: clear failure flag on success
+    currentRadius = MAX_DIST;     // Fix 5: reset radius so next Refresh starts fresh
+
+    // ── Write to cache ──
+    if(sorted.length > 0){
+      try {
+        sessionStorage.setItem(cacheKey, JSON.stringify(sorted));
+        sessionStorage.setItem(cacheMetaKey, JSON.stringify({ ts: Date.now(), lat, lon }));
+      } catch(e){ dbg('Cache write error: ' + e.message); }
+    }
+
+    if(sorted.length === 0){
+      statusPill.textContent = '0 places — tap Refresh to widen';
+      showErrorToast('0 places within ' + (MAX_DIST/1000).toFixed(1) + ' km. See debug panel. Tap Refresh to widen search.');
+    } else {
+      statusPill.textContent = sorted.length + ' places nearby';
+      dbg('compass=' + (state.headingReceived ? 'OK heading='+state.heading.toFixed(1) : 'NOT RECEIVED — radar mode active'));
+      showCalibToast();
+    }
+
+  } finally {
+    fetchInFlight = false;   // always release guard, even if an exception is thrown
   }
 }
 
@@ -952,6 +1000,10 @@ function startGPSWatch(){
     opts = { enableHighAccuracy: false, maximumAge: 300000,  timeout: 8000  };
     dbg('GPS phase=CACHED (accepting up to 5-min-old position)');
     statusPill.textContent = 'Using last known location…';
+  } else {
+    // Fallback for any unexpected phase state — safe default
+    opts = { enableHighAccuracy: false, maximumAge: 60000, timeout: 15000 };
+    dbg('GPS phase=' + gpsPhase + ' (unexpected) — using safe defaults');
   }
 
   // Pulsing dots while waiting
@@ -1048,25 +1100,31 @@ function startGPSWatch(){
   );
 }
 
-// When the user brings the page back to foreground, reset and restart GPS
+// When the user brings the page back to foreground, restart GPS only if needed
 document.addEventListener('visibilitychange', () => {
   if(document.visibilityState === 'visible' && state.ready){
-    dbg('Page visible — resetting GPS');
-    gpsFailCount = 0;
-    gpsPhase = 'high';
-    clearGPSWatch();
-    startGPSWatch();
+    if(!gpsWatchActive){
+      dbg('Page visible — GPS watch was dead, restarting');
+      gpsFailCount = 0;
+      gpsPhase = 'high';
+      startGPSWatch();
+    } else {
+      dbg('Page visible — GPS watch still active, no restart needed');
+    }
+    // Always re-register compass listeners (iOS sometimes drops them on background)
+    registerOrientationListeners();
   }
 });
 
 // Also restart on pageshow (handles iOS Safari back-forward cache restore)
 window.addEventListener('pageshow', e => {
   if(e.persisted && state.ready){
-    dbg('pageshow (persisted) — restarting GPS');
+    dbg('pageshow (persisted) — restarting GPS and compass');
     gpsFailCount = 0;
     gpsPhase = 'high';
     clearGPSWatch();
     startGPSWatch();
+    registerOrientationListeners();
   }
 });
 
@@ -1096,7 +1154,7 @@ async function startReal(){
   state.ready = true;
   refreshBtn.style.display = 'flex';
   document.getElementById('debug-toggle').style.display = 'block';
-  requestAnimationFrame(renderLoop);
+  if(!_rafRunning){ _rafRunning = true; requestAnimationFrame(renderLoop); }
 
   // Start GPS watch — non-blocking, calls fetchPlaces when fix arrives
   startGPSWatch();
@@ -1126,7 +1184,7 @@ function startDemo(){
   refreshBtn.style.display = 'flex';
   document.getElementById('debug-toggle').style.display = 'block';
   dbg('Demo mode ready');
-  requestAnimationFrame(renderLoop);
+  if(!_rafRunning){ _rafRunning = true; requestAnimationFrame(renderLoop); }
 }
 
 // ─────────────────────────────────────────────
@@ -1137,6 +1195,16 @@ function showCalibToast(){
   setTimeout(() => calibToast.classList.remove('show'), 4000);
 }
 
+let _lastHitDots = [];
+function _shouldRebuildHits(dots){
+  if(dots.length !== _lastHitDots.length) return true;
+  for(let i = 0; i < dots.length; i++){
+    const a = dots[i], b = _lastHitDots[i];
+    if(a.place !== b.place || Math.abs(a.x - b.x) > 2 || Math.abs(a.y - b.y) > 2) return true;
+  }
+  return false;
+}
+
 // ─────────────────────────────────────────────
 //  AR Render loop
 // ─────────────────────────────────────────────
@@ -1145,10 +1213,13 @@ const H = () => canvas.height;
 
 // dot info cache per frame
 let frameDots = [];
+let _rafRunning = false;  // guard: only one rAF loop at a time
 
 function renderLoop(){
   requestAnimationFrame(renderLoop);
   if(!state.ready) return;
+  // Safety: if canvas has zero size (e.g. hidden tab) skip this frame
+  if(W() === 0 || H() === 0) return;
 
   ctx.clearRect(0, 0, W(), H());
   frameDots = [];
@@ -1175,61 +1246,77 @@ function renderLoop(){
 
   const now = Date.now();
 
-  for(const place of state.places){
+  // ── Overlap avoidance: track placed dot positions ──
+  // We record screen positions and skip dots too close to an already-placed dot.
+  const placedPositions = []; // {x, y, minGap}
+  const MIN_DOT_GAP = 52; // px — minimum centre-to-centre distance before we skip
+
+  // ── Band-based Y distribution ──
+  // Divide screen height into bands and assign each rank a band row,
+  // then add a per-place deterministic horizontal offset inside that band.
+  // This gives a genuinely 2-D scatter, not a line.
+  const BANDS = 5;
+  const bandH = (H() * 0.60) / BANDS;      // usable region: 20%–80% of screen
+  const topY  = H() * 0.20;
+
+  for(let rank = 0; rank < state.places.length; rank++){
+    const place = state.places[rank];
     if(!state.lat) break;
     const bear = bearing(state.lat, state.lon, place.lat, place.lon);
     const diff = compassReady ? angleDiff(bear, heading) : angleDiff(bear, heading);
 
-    // In radar mode spread all places evenly across screen width
+    // FOV culling
     const bufFOV = halfFOV + 8;
-    if(compassReady && Math.abs(diff) > bufFOV) continue;
-    // In radar mode: map full 360° to screen width
-    if(!compassReady && Math.abs(diff) > 180) continue;
+    if(compassReady  && Math.abs(diff) > bufFOV) continue;
+    if(!compassReady && Math.abs(diff) > 180)    continue;
 
     const x = cx + (diff / halfFOV) * cx;
 
     // distFactor: 1.0 = very close, 0.0 = at MAX_DIST
     const distFactor = Math.max(0, 1 - place.dist / MAX_DIST);
 
-    // Y: closer places sit higher on screen (like AR perspective).
-    // Spread across 20%–75% of screen height so dots aren't all on one line.
-    // A small deterministic jitter per place breaks ties when many share same distance.
-    const rank = state.places.indexOf(place);
-    const jitter = ((rank * 37 + 13) % 60) - 30; // –30..+30 px, stable per place
-    const yBase = H() * 0.75 - distFactor * H() * 0.50; // far=75%, close=25%
-    const y = yBase + jitter;
+    // ── Y: band row + deterministic fine jitter ──
+    // Closer places (higher distFactor) go in upper bands.
+    // We map distFactor→band so close=band0 (top) and far=band4 (bottom).
+    const bandIdx  = Math.floor((1 - distFactor) * BANDS); // 0=closest … BANDS-1=farthest
+    const clampedBand = Math.min(bandIdx, BANDS - 1);
+    // Jitter within the band: stable per place so it doesn't flicker
+    const bandJitter = ((rank * 53 + 7) % Math.floor(bandH * 0.8)) - (bandH * 0.4);
+    const y = topY + clampedBand * bandH + bandH * 0.5 + bandJitter;
 
-    // Size: closer = bigger, kept compact
-    const baseSize = 6 + distFactor * 8;  // range 6–14px radius
+    // ── Overlap check ──
+    let tooClose = false;
+    for(const p of placedPositions){
+      const dx = x - p.x, dy = y - p.y;
+      if(dx*dx + dy*dy < MIN_DOT_GAP * MIN_DOT_GAP){ tooClose = true; break; }
+    }
+    if(tooClose) continue;
+    placedPositions.push({x, y});
+
+    // ── Size: smaller, solid ──
+    const baseSize = 4 + distFactor * 4;  // range 4–8px radius (was 6–14)
 
     // Edge fade
     const edgeFade = Math.max(0, 1 - Math.abs(diff) / bufFOV);
-    const alpha = edgeFade * (0.75 + distFactor * 0.25);
+    const alpha = edgeFade * (0.80 + distFactor * 0.20);
 
     // Subtle pulse only for the single closest place
-    const pulse = rank === 0 ? 1 + 0.12 * Math.sin(now / 700) : 1;
+    const pulse = rank === 0 ? 1 + 0.10 * Math.sin(now / 700) : 1;
     const r = baseSize * pulse;
 
     // Determine solid color by amenity
-    let dotColor;
+    let dotR, dotG, dotB;
     const a = place.tags.amenity;
-    if(a === 'cafe')           dotColor = `rgba(255,159,10,${alpha})`;
-    else if(a === 'fast_food') dotColor = `rgba(255,69,58,${alpha})`;
-    else if(a === 'bar')       dotColor = `rgba(48,209,88,${alpha})`;
-    else                       dotColor = `rgba(255,59,48,${alpha})`;
+    if(a === 'cafe')           { dotR=255; dotG=159; dotB=10;  }
+    else if(a === 'fast_food') { dotR=255; dotG=69;  dotB=58;  }
+    else if(a === 'bar')       { dotR=48;  dotG=209; dotB=88;  }
+    else                       { dotR=255; dotG=59;  dotB=48;  }
 
-    // Solid filled dot
+    // ── Solid filled dot (no stroke) ──
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fillStyle = dotColor;
+    ctx.fillStyle = `rgba(${dotR},${dotG},${dotB},${alpha})`;
     ctx.fill();
-
-    // Thin white border so dot reads against any background
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.strokeStyle = `rgba(255,255,255,${alpha * 0.6})`;
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
 
     // Name label — always above the dot
     {
@@ -1257,11 +1344,15 @@ function renderLoop(){
       ctx.fillText(formatDist(place.dist), x, y + r + 13);
     }
 
-    frameDots.push({ place, x, y, r: r + 16 });
+    frameDots.push({ place, x, y, r: r + 18 });
   }
 
-  // Rebuild hit targets
-  rebuildHitTargets();
+  // Rebuild hit targets only when dots change (count or positions shift >2px)
+  // This avoids DOM layout thrash at 60fps.
+  if(_shouldRebuildHits(frameDots)){
+    _lastHitDots = frameDots.map(d => ({x:d.x, y:d.y, r:d.r, place:d.place}));
+    rebuildHitTargets();
+  }
 
   // Log render stats every 4s
   const now4 = Date.now();
@@ -1457,37 +1548,54 @@ document.getElementById('demo-btn').addEventListener('click', startDemo);
 let currentRadius = MAX_DIST;
 refreshBtn.addEventListener('click', async () => {
   if(state.demoMode){ loadDemoPlaces(); return; }
-  if(!state.lat){ statusPill.textContent = 'Still waiting for GPS…'; dbg('Refresh tapped but GPS still null'); return; }
-  gpsFetched = true; // already fetched once, reset handled below
+  if(!state.lat){ statusPill.textContent = 'Still waiting for GPS…'; dbg('Refresh tapped but GPS null'); return; }
+  if(fetchInFlight){ dbg('Refresh tapped but fetch in flight'); return; }
 
-  // FIX: if 0 results, progressively widen search on each refresh tap
-  if(state.places.length === 0 && currentRadius < 5000){
-    currentRadius = Math.min(currentRadius * 2, 5000);
-    const origFilter = currentRadius;
-    const query = `[out:json][timeout:30];(node["amenity"~"restaurant|cafe|fast_food|bar"](around:${origFilter},${state.lat},${state.lon});way["amenity"~"restaurant|cafe|fast_food|bar"](around:${origFilter},${state.lat},${state.lon}););out center tags;`;
+  // Clear cache so we get a fresh result
+  try { sessionStorage.removeItem('arplaces_meta'); } catch(_){}
+
+  if(state.places.length === 0 && currentRadius < 8000){
+    // Widen search progressively: 1500 → 3000 → 6000 → 8000m
+    currentRadius = currentRadius >= 6000 ? 8000 : Math.min(currentRadius * 2, 6000);
+    const r = currentRadius;
+    const query = `[out:json][timeout:30];(node["amenity"~"restaurant|cafe|fast_food|bar"](around:${r},${state.lat},${state.lon});way["amenity"~"restaurant|cafe|fast_food|bar"](around:${r},${state.lat},${state.lon}););out center tags;`;
     const body = 'data=' + encodeURIComponent(query);
-    for(let i = 0; i < OVERPASS_MIRRORS.length; i++){
-      const mirror = OVERPASS_MIRRORS[i];
-      statusPill.textContent = `⏳ Widening to ${(origFilter/1000).toFixed(1)} km… (${i+1}/${OVERPASS_MIRRORS.length})`;
-      const t0 = Date.now();
-      try {
-        const res = await fetch(mirror, { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body, signal: AbortSignal.timeout(30000) });
-        if(!res.ok) continue;
-        const data = await res.json();
-        if(!Array.isArray(data.elements)) continue;
-        state.places = data.elements.map(el => {
-          const elLat = el.lat ?? el.center?.lat;
-          const elLon = el.lon ?? el.center?.lon;
-          if(elLat==null||elLon==null) return null;
-          return { id:el.id, osmType:el.type||'node', name:el.tags?.name||'Unnamed Place', lat:elLat, lon:elLon, tags:el.tags||{}, dist:haversine(state.lat,state.lon,elLat,elLon) };
-        }).filter(Boolean).filter(p=>p.dist<=origFilter).sort((a,b)=>a.dist-b.dist).slice(0,60);
-        placeCount.textContent = state.places.length;
-        statusPill.textContent = state.places.length > 0 ? `${state.places.length} places (${(origFilter/1000).toFixed(1)} km)` : '0 places — try wider';
-        break;
-      } catch(e){ continue; }
+
+    statusPill.textContent = `⏳ Widening to ${(r/1000).toFixed(1)} km…`;
+    dbg('Widening search to ' + r + 'm');
+
+    const controllers = OVERPASS_MIRRORS.map(() => new AbortController());
+    let found = null;
+    try {
+      found = await Promise.any(OVERPASS_MIRRORS.map((mirror, i) => {
+        const timer = setTimeout(() => controllers[i].abort(), 25000);
+        return fetch(mirror, { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body, signal: controllers[i].signal })
+          .then(async res => { clearTimeout(timer); if(!res.ok) throw new Error('HTTP '+res.status); return res.json(); })
+          .then(d => { if(!Array.isArray(d.elements)) throw new Error('no elements'); return d; })
+          .catch(e => { clearTimeout(timer); throw e; });
+      }));
+      controllers.forEach(c => { try{ c.abort(); }catch(_){} });
+    } catch(_) {
+      controllers.forEach(c => { try{ c.abort(); }catch(_){} });
+    }
+
+    if(found && Array.isArray(found.elements)){
+      state.places = found.elements.map(el => {
+        const elLat = el.lat ?? el.center?.lat;
+        const elLon = el.lon ?? el.center?.lon;
+        if(elLat==null||elLon==null) return null;
+        return { id:el.id, osmType:el.type||'node', name:el.tags?.name||'Unnamed Place', lat:elLat, lon:elLon, tags:el.tags||{}, dist:haversine(state.lat,state.lon,elLat,elLon) };
+      }).filter(Boolean).filter(p=>p.dist<=r).sort((a,b)=>a.dist-b.dist).slice(0,60);
+      placeCount.textContent = state.places.length;
+      statusPill.textContent = state.places.length > 0
+        ? `${state.places.length} places within ${(r/1000).toFixed(1)} km`
+        : r >= 8000 ? '0 places within 8 km — area may lack OSM data' : '0 places — tap Refresh to widen further';
+      dbg('Widen result: ' + state.places.length + ' places at ' + r + 'm');
+    } else {
+      statusPill.textContent = '⚠️ Servers unreachable — try again';
     }
   } else {
-    currentRadius = MAX_DIST; // reset
+    currentRadius = MAX_DIST;
     await fetchPlaces(state.lat, state.lon);
   }
 });
