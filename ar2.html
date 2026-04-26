@@ -412,10 +412,11 @@ const FOV_H  = 65;   // assumed horizontal FOV degrees
 const MAX_DIST = 1500; // FIX: 500m too small for Fujairah/sparse cities — 1500m
 
 // Overpass mirrors — tried in order, first success wins
+// mail.ru removed (blocked by UAE ISPs); private.coffee added (reliable EU mirror)
 const OVERPASS_MIRRORS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
-  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
   'https://overpass.openstreetmap.ru/api/interpreter',
 ];
 
@@ -522,11 +523,28 @@ async function fetchPlaces(lat, lon){
     return;
   }
 
+  // ── sessionStorage cache (keyed to 0.01° grid ≈ 1 km) ──
+  const cacheKey = 'arplaces_' + lat.toFixed(2) + '_' + lon.toFixed(2);
+  try {
+    const cached = sessionStorage.getItem(cacheKey);
+    if(cached){
+      const parsed = JSON.parse(cached);
+      if(Array.isArray(parsed) && parsed.length > 0){
+        state.places = parsed.map(p => ({ ...p, dist: haversine(lat, lon, p.lat, p.lon) }));
+        placeCount.textContent = state.places.length;
+        statusPill.textContent = state.places.length + ' places nearby (cached)';
+        dbg('Cache hit — ' + state.places.length + ' places, skipping network');
+        showCalibToast();
+        return;
+      }
+    }
+  } catch(e){ dbg('Cache read error: ' + e.message); }
+
   dbg('fetch lat=' + lat.toFixed(5) + ' lon=' + lon.toFixed(5) + ' r=' + MAX_DIST + 'm');
   loadOverlay.classList.add('active');
   statusPill.textContent = 'Loading places…';
 
-  const query = '[out:json][timeout:25];(node["amenity"~"restaurant|cafe|fast_food|bar"](around:' + MAX_DIST + ',' + lat + ',' + lon + ');way["amenity"~"restaurant|cafe|fast_food|bar"](around:' + MAX_DIST + ',' + lat + ',' + lon + '););out center tags;';
+  const query = '[out:json][timeout:30];(node["amenity"~"restaurant|cafe|fast_food|bar"](around:' + MAX_DIST + ',' + lat + ',' + lon + ');way["amenity"~"restaurant|cafe|fast_food|bar"](around:' + MAX_DIST + ',' + lat + ',' + lon + '););out center tags;';
   const body = 'data=' + encodeURIComponent(query);
 
   let data = null;
@@ -542,7 +560,7 @@ async function fetchPlaces(lat, lon){
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body,
-        signal: AbortSignal.timeout(20000),
+        signal: AbortSignal.timeout(30000),  // increased from 20s → 30s
       });
       dbg('HTTP ' + res.status + ' from ' + host);
       if(!res.ok) throw new Error('HTTP ' + res.status);
@@ -560,10 +578,18 @@ async function fetchPlaces(lat, lon){
   }
 
   if(!data || !Array.isArray(data.elements)){
-    statusPill.textContent = '⚠️ All servers failed — tap Refresh';
-    showErrorToast('All OSM servers failed. Last: ' + lastError);
-    dbg('All mirrors failed');
+    statusPill.textContent = '⚠️ All servers failed — retrying in 15s…';
+    showErrorToast('All OSM servers failed. Last: ' + lastError + '. Retrying automatically in 15s.');
+    dbg('All mirrors failed — auto-retry in 15s');
+    fetchFailed = true;
     loadOverlay.classList.remove('active');
+    // Auto-retry once after 15s instead of requiring manual tap
+    setTimeout(() => {
+      if(state.lat !== null && !state.demoMode){
+        dbg('Auto-retry fetch after server failure');
+        fetchPlaces(state.lat, state.lon);
+      }
+    }, 15000);
     return;
   }
 
@@ -598,6 +624,12 @@ async function fetchPlaces(lat, lon){
 
   state.places = sorted;
   placeCount.textContent = sorted.length;
+
+  // ── Write to cache so next load is instant ──
+  if(sorted.length > 0){
+    try { sessionStorage.setItem(cacheKey, JSON.stringify(sorted)); }
+    catch(e){ dbg('Cache write error: ' + e.message); }
+  }
 
   if(sorted.length === 0){
     statusPill.textContent = '0 places — tap Refresh to widen';
@@ -799,6 +831,7 @@ async function startCamera(){
 // ─────────────────────────────────────────────
 let gpsWatchId    = null;
 let gpsFetched    = false;
+let fetchFailed   = false;   // true if first fetch attempt produced 0 results or failed
 let gpsRetryTimer = null;
 let gpsWatchActive = false;
 let gpsFailCount  = 0;          // consecutive POSITION_UNAVAILABLE count
@@ -856,6 +889,11 @@ function startGPSWatch(){
 
       if(!gpsFetched){
         gpsFetched = true;
+        fetchPlaces(lat, lon);
+      } else if(fetchFailed){
+        // GPS resolved again after a failed fetch — retry now
+        fetchFailed = false;
+        dbg('GPS re-fix after failed fetch — retrying fetchPlaces');
         fetchPlaces(lat, lon);
       }
     },
