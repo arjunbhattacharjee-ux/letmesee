@@ -541,8 +541,9 @@ async function fetchPlaces(lat, lon){
   } catch(e){ dbg('Cache read error: ' + e.message); }
 
   dbg('fetch lat=' + lat.toFixed(5) + ' lon=' + lon.toFixed(5) + ' r=' + MAX_DIST + 'm');
-  loadOverlay.classList.add('active');
-  statusPill.textContent = 'Loading places…';
+  // No full-screen overlay — show progress inline in the status pill so the
+  // user can see what's happening and still tap Refresh at any time.
+  loadOverlay.classList.remove('active');
 
   const query = '[out:json][timeout:30];(node["amenity"~"restaurant|cafe|fast_food|bar"](around:' + MAX_DIST + ',' + lat + ',' + lon + ');way["amenity"~"restaurant|cafe|fast_food|bar"](around:' + MAX_DIST + ',' + lat + ',' + lon + '););out center tags;';
   const body = 'data=' + encodeURIComponent(query);
@@ -553,14 +554,15 @@ async function fetchPlaces(lat, lon){
   for(let i = 0; i < OVERPASS_MIRRORS.length; i++){
     const mirror = OVERPASS_MIRRORS[i];
     const host = mirror.replace('https://','').split('/')[0];
-    statusPill.textContent = 'Server ' + (i+1) + '/' + OVERPASS_MIRRORS.length + '…';
+    // Show a pulsing dot so the user knows something is happening
+    statusPill.textContent = '⏳ Searching ' + (i+1) + '/' + OVERPASS_MIRRORS.length + '…';
     dbg('Trying ' + host);
     try {
       const res = await fetch(mirror, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body,
-        signal: AbortSignal.timeout(30000),  // increased from 20s → 30s
+        signal: AbortSignal.timeout(30000),
       });
       dbg('HTTP ' + res.status + ' from ' + host);
       if(!res.ok) throw new Error('HTTP ' + res.status);
@@ -578,12 +580,10 @@ async function fetchPlaces(lat, lon){
   }
 
   if(!data || !Array.isArray(data.elements)){
-    statusPill.textContent = '⚠️ All servers failed — retrying in 15s…';
-    showErrorToast('All OSM servers failed. Last: ' + lastError + '. Retrying automatically in 15s.');
+    statusPill.textContent = '⚠️ No server responded';
+    showErrorToast('All OSM servers failed (' + lastError + '). Retrying in 15s — or tap Refresh now.');
     dbg('All mirrors failed — auto-retry in 15s');
     fetchFailed = true;
-    loadOverlay.classList.remove('active');
-    // Auto-retry once after 15s instead of requiring manual tap
     setTimeout(() => {
       if(state.lat !== null && !state.demoMode){
         dbg('Auto-retry fetch after server failure');
@@ -639,8 +639,6 @@ async function fetchPlaces(lat, lon){
     dbg('compass=' + (state.headingReceived ? 'OK heading='+state.heading.toFixed(1) : 'NOT RECEIVED — radar mode active'));
     showCalibToast();
   }
-
-  loadOverlay.classList.remove('active');
 }
 
 // ─────────────────────────────────────────────
@@ -1458,15 +1456,14 @@ refreshBtn.addEventListener('click', async () => {
   // FIX: if 0 results, progressively widen search on each refresh tap
   if(state.places.length === 0 && currentRadius < 5000){
     currentRadius = Math.min(currentRadius * 2, 5000);
-    statusPill.textContent = `Widening to ${(currentRadius/1000).toFixed(1)} km…`;
-    // Temporarily override MAX_DIST for this fetch
     const origFilter = currentRadius;
-    const query = `[out:json][timeout:25];(node["amenity"~"restaurant|cafe|fast_food|bar"](around:${origFilter},${state.lat},${state.lon});way["amenity"~"restaurant|cafe|fast_food|bar"](around:${origFilter},${state.lat},${state.lon}););out center tags;`;
+    const query = `[out:json][timeout:30];(node["amenity"~"restaurant|cafe|fast_food|bar"](around:${origFilter},${state.lat},${state.lon});way["amenity"~"restaurant|cafe|fast_food|bar"](around:${origFilter},${state.lat},${state.lon}););out center tags;`;
     const body = 'data=' + encodeURIComponent(query);
-    loadOverlay.classList.add('active');
-    for(const mirror of OVERPASS_MIRRORS){
+    for(let i = 0; i < OVERPASS_MIRRORS.length; i++){
+      const mirror = OVERPASS_MIRRORS[i];
+      statusPill.textContent = `⏳ Widening to ${(origFilter/1000).toFixed(1)} km… (${i+1}/${OVERPASS_MIRRORS.length})`;
       try {
-        const res = await fetch(mirror, { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body, signal: AbortSignal.timeout(22000) });
+        const res = await fetch(mirror, { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body, signal: AbortSignal.timeout(30000) });
         if(!res.ok) continue;
         const data = await res.json();
         if(!Array.isArray(data.elements)) continue;
@@ -1481,7 +1478,6 @@ refreshBtn.addEventListener('click', async () => {
         break;
       } catch(e){ continue; }
     }
-    loadOverlay.classList.remove('active');
   } else {
     currentRadius = MAX_DIST; // reset
     await fetchPlaces(state.lat, state.lon);
