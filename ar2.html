@@ -291,7 +291,7 @@
 
   /* ── refresh btn ── */
   #refresh-btn {
-    position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
+    position: fixed; bottom: 96px; left: 50%; transform: translateX(-50%);
     background: var(--glass);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
@@ -306,6 +306,49 @@
     white-space: nowrap;
   }
   #refresh-btn:active { opacity: 0.7; }
+
+  /* ── filter bar ── */
+  #filter-bar {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    padding: 10px 14px;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, transparent 100%);
+    display: none; /* shown after app starts */
+    flex-direction: row;
+    gap: 8px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    z-index: 12;
+    pointer-events: all;
+  }
+  #filter-bar::-webkit-scrollbar { display: none; }
+
+  .filter-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    flex-shrink: 0;
+    background: var(--glass);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 0.5px solid rgba(255,255,255,0.15);
+    border-radius: 50px;
+    padding: 7px 13px;
+    font-family: var(--font);
+    font-size: 12px; font-weight: 500;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    white-space: nowrap;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+  .filter-chip .chip-emoji { font-size: 14px; }
+  .filter-chip.active {
+    background: var(--chip-color, var(--accent));
+    border-color: transparent;
+    color: #fff;
+  }
+  .filter-chip:active { opacity: 0.75; }
 </style>
 </head>
 <body>
@@ -385,6 +428,11 @@
   <span>&#x21BA;</span> Refresh Places
 </button>
 
+<!-- filter bar -->
+<div id="filter-bar">
+  <!-- chips are built by JS so colors/ids stay in sync with FILTER_DEFS -->
+</div>
+
 <!-- debug toggle -->
 <button id="debug-toggle" style="position:fixed;bottom:40px;right:20px;background:rgba(10,10,12,0.8);color:rgba(255,255,255,0.5);border:0.5px solid rgba(255,255,255,0.15);border-radius:50px;font-size:12px;padding:8px 14px;cursor:pointer;z-index:15;font-family:inherit;display:none;">&#128269; Debug</button>
 
@@ -410,6 +458,29 @@ const state = {
 const SMOOTH = 0.12;
 const FOV_H  = 65;   // assumed horizontal FOV degrees
 const MAX_DIST = 1500; // FIX: 500m too small for Fujairah/sparse cities — 1500m
+
+// ─────────────────────────────────────────────
+//  Filter definitions
+//  Each entry drives: the chip label, OSM query
+//  tags, dot color, emoji, and category label.
+// ─────────────────────────────────────────────
+const FILTER_DEFS = [
+  { id:'all',          label:'All',          emoji:'🌐', color:'#636366', amenityMatch:null, shopMatch:null, tourismMatch:null },
+  { id:'restaurant',   label:'Restaurants',  emoji:'🍽️', color:'#FF3B30', amenityMatch:['restaurant'] },
+  { id:'cafe',         label:'Cafés',        emoji:'☕', color:'#FF9F0A', amenityMatch:['cafe'] },
+  { id:'fast_food',    label:'Fast Food',    emoji:'🍔', color:'#FF6B35', amenityMatch:['fast_food'] },
+  { id:'bar',          label:'Bars',         emoji:'🍺', color:'#30D158', amenityMatch:['bar'] },
+  { id:'fuel',         label:'Petrol',       emoji:'⛽', color:'#64D2FF', amenityMatch:['fuel'] },
+  { id:'attraction',   label:'Attractions',  emoji:'🏛️', color:'#BF5AF2', tourismMatch:['attraction','museum','gallery','artwork','viewpoint','zoo','theme_park','aquarium'] },
+  { id:'hotel',        label:'Hotels',       emoji:'🏨', color:'#0A84FF', tourismMatch:['hotel','motel','hostel','guest_house','resort'] },
+  { id:'supermarket',  label:'Shopping',     emoji:'🛒', color:'#FF375F', shopMatch:['supermarket','mall','convenience','general'], amenityMatch:['marketplace'] },
+  { id:'pharmacy',     label:'Pharmacy',     emoji:'💊', color:'#34C759', amenityMatch:['pharmacy'], shopMatch:['pharmacy'] },
+  { id:'atm',          label:'ATM / Bank',   emoji:'🏦', color:'#FFD60A', amenityMatch:['atm','bank'] },
+  { id:'mosque',       label:'Worship',      emoji:'🕌', color:'#AC8E68', amenityMatch:['place_of_worship'] },
+];
+
+// Active filter IDs — multi-select; 'all' is the default catch-all
+const state_filters = new Set(['all']);
 
 // Overpass mirrors — ordered by UAE reliability.
 // overpass-api.de is blocked by some UAE ISPs (fails in <1s with "Load failed").
@@ -464,24 +535,86 @@ function formatDist(m){
 }
 
 function formatCategory(tags){
-  if(tags.cuisine) return tags.cuisine.split(';')[0].replace(/_/g,' ');
+  if(tags.tourism === 'hotel' || tags.tourism === 'motel' || tags.tourism === 'hostel' || tags.tourism === 'guest_house' || tags.tourism === 'resort') return 'Hotel';
+  if(tags.tourism === 'museum') return 'Museum';
+  if(tags.tourism === 'attraction') return 'Attraction';
+  if(tags.tourism === 'viewpoint') return 'Viewpoint';
+  if(tags.tourism === 'gallery') return 'Gallery';
+  if(tags.tourism === 'zoo') return 'Zoo';
+  if(tags.tourism === 'theme_park') return 'Theme Park';
+  if(tags.tourism === 'aquarium') return 'Aquarium';
+  if(tags.tourism) return tags.tourism.replace(/_/g,' ');
+  if(tags.shop === 'supermarket') return 'Supermarket';
+  if(tags.shop === 'mall') return 'Mall';
+  if(tags.shop === 'pharmacy') return 'Pharmacy';
+  if(tags.shop) return tags.shop.replace(/_/g,' ');
+  if(tags.amenity === 'fuel') return 'Petrol Station';
+  if(tags.amenity === 'pharmacy') return 'Pharmacy';
+  if(tags.amenity === 'atm') return 'ATM';
+  if(tags.amenity === 'bank') return 'Bank';
+  if(tags.amenity === 'marketplace') return 'Market';
+  if(tags.amenity === 'place_of_worship') return tags.religion === 'muslim' ? 'Mosque' : 'Worship';
   if(tags.amenity === 'cafe') return 'Café';
   if(tags.amenity === 'fast_food') return 'Fast Food';
-  if(tags.amenity === 'restaurant') return 'Restaurant';
+  if(tags.amenity === 'restaurant'){
+    if(tags.cuisine) return tags.cuisine.split(';')[0].replace(/_/g,' ');
+    return 'Restaurant';
+  }
   if(tags.amenity === 'bar') return 'Bar';
-  return 'Eatery';
+  return 'Place';
 }
 
 function getTypeEmoji(tags){
+  if(tags.tourism === 'hotel' || tags.tourism === 'motel' || tags.tourism === 'hostel' || tags.tourism === 'guest_house' || tags.tourism === 'resort') return '🏨';
+  if(tags.tourism === 'museum') return '🏛️';
+  if(tags.tourism === 'attraction') return '🏛️';
+  if(tags.tourism === 'viewpoint') return '🌅';
+  if(tags.tourism === 'gallery') return '🖼️';
+  if(tags.tourism === 'zoo') return '🦁';
+  if(tags.tourism === 'theme_park') return '🎡';
+  if(tags.tourism === 'aquarium') return '🐠';
+  if(tags.shop === 'supermarket' || tags.shop === 'mall' || tags.shop === 'convenience' || tags.shop === 'general') return '🛒';
+  if(tags.shop === 'pharmacy' || tags.amenity === 'pharmacy') return '💊';
+  if(tags.amenity === 'fuel') return '⛽';
+  if(tags.amenity === 'atm') return '🏧';
+  if(tags.amenity === 'bank') return '🏦';
+  if(tags.amenity === 'marketplace') return '🛒';
+  if(tags.amenity === 'place_of_worship') return '🕌';
   if(tags.amenity === 'cafe') return '☕';
   if(tags.amenity === 'fast_food') return '🍔';
   if(tags.amenity === 'bar') return '🍺';
   return '🍽️';
 }
 
-// ─────────────────────────────────────────────
-//  DOM refs
-// ─────────────────────────────────────────────
+// Returns [r,g,b] for a place's dot based on its tags
+function getDotColor(tags){
+  if(tags.amenity === 'cafe')              return [255,159,10];
+  if(tags.amenity === 'fast_food')         return [255,107,53];
+  if(tags.amenity === 'bar')               return [48,209,88];
+  if(tags.amenity === 'fuel')              return [100,210,255];
+  if(tags.amenity === 'pharmacy' || tags.shop === 'pharmacy') return [52,199,89];
+  if(tags.amenity === 'atm' || tags.amenity === 'bank') return [255,214,10];
+  if(tags.amenity === 'marketplace')       return [255,55,95];
+  if(tags.amenity === 'place_of_worship')  return [172,142,104];
+  if(tags.tourism === 'hotel' || tags.tourism === 'motel' || tags.tourism === 'hostel' || tags.tourism === 'guest_house' || tags.tourism === 'resort') return [10,132,255];
+  if(tags.tourism)                         return [191,90,242];
+  if(tags.shop)                            return [255,55,95];
+  return [255,59,48]; // restaurant default
+}
+
+// Returns true if place passes the current filter selection
+function placePassesFilter(place){
+  if(state_filters.has('all')) return true;
+  const tags = place.tags;
+  for(const fid of state_filters){
+    const def = FILTER_DEFS.find(f => f.id === fid);
+    if(!def) continue;
+    if(def.amenityMatch && tags.amenity && def.amenityMatch.includes(tags.amenity)) return true;
+    if(def.tourismMatch && tags.tourism && def.tourismMatch.includes(tags.tourism)) return true;
+    if(def.shopMatch    && tags.shop    && def.shopMatch.includes(tags.shop))       return true;
+  }
+  return false;
+}
 const video      = document.getElementById('video');
 const canvas     = document.getElementById('ar-canvas');
 const ctx        = canvas.getContext('2d');
@@ -494,10 +627,50 @@ const compassSVG = document.getElementById('compass-svg');
 const calibToast = document.getElementById('calib-toast');
 const placeCount = document.getElementById('place-count');
 const refreshBtn = document.getElementById('refresh-btn');
+const filterBar  = document.getElementById('filter-bar');
 
 // ─────────────────────────────────────────────
-//  Canvas sizing
+//  Filter bar — build chips & handle taps
 // ─────────────────────────────────────────────
+(function buildFilterBar(){
+  FILTER_DEFS.forEach(def => {
+    const chip = document.createElement('button');
+    chip.className = 'filter-chip' + (def.id === 'all' ? ' active' : '');
+    chip.dataset.fid = def.id;
+    chip.style.setProperty('--chip-color', def.color);
+    chip.innerHTML = `<span class="chip-emoji">${def.emoji}</span>${def.label}`;
+    chip.addEventListener('click', () => handleFilterTap(def.id));
+    filterBar.appendChild(chip);
+  });
+})();
+
+function handleFilterTap(fid){
+  if(fid === 'all'){
+    // Reset to "All"
+    state_filters.clear();
+    state_filters.add('all');
+  } else {
+    state_filters.delete('all');
+    if(state_filters.has(fid)){
+      state_filters.delete(fid);
+      // If nothing left, revert to all
+      if(state_filters.size === 0) state_filters.add('all');
+    } else {
+      state_filters.add(fid);
+    }
+  }
+  // Update chip active states
+  filterBar.querySelectorAll('.filter-chip').forEach(chip => {
+    chip.classList.toggle('active', state_filters.has(chip.dataset.fid));
+  });
+  // Update the count badge to reflect filtered count
+  const visible = state.places.filter(placePassesFilter).length;
+  placeCount.textContent = visible;
+}
+
+function showFilterBar(){
+  filterBar.style.display = 'flex';
+}
 let _resizeTimer = null;
 function resizeCanvas(){
   canvas.width  = window.innerWidth;
@@ -574,7 +747,14 @@ async function fetchPlaces(lat, lon){
   // Cancel any pending auto-retry — this fetch supersedes it
   if(fetchRetryTimer !== null){ clearTimeout(fetchRetryTimer); fetchRetryTimer = null; }
 
-  const query = '[out:json][timeout:30];(node["amenity"~"restaurant|cafe|fast_food|bar"](around:' + MAX_DIST + ',' + lat + ',' + lon + ');way["amenity"~"restaurant|cafe|fast_food|bar"](around:' + MAX_DIST + ',' + lat + ',' + lon + '););out center tags;';
+  const query = '[out:json][timeout:30];(' +
+    'node["amenity"~"restaurant|cafe|fast_food|bar|fuel|pharmacy|atm|bank|marketplace|place_of_worship"](around:' + MAX_DIST + ',' + lat + ',' + lon + ');' +
+    'way["amenity"~"restaurant|cafe|fast_food|bar|fuel|pharmacy|atm|bank|marketplace|place_of_worship"](around:' + MAX_DIST + ',' + lat + ',' + lon + ');' +
+    'node["tourism"~"attraction|museum|gallery|artwork|viewpoint|zoo|theme_park|aquarium|hotel|motel|hostel|guest_house|resort"](around:' + MAX_DIST + ',' + lat + ',' + lon + ');' +
+    'way["tourism"~"attraction|museum|gallery|artwork|viewpoint|zoo|theme_park|aquarium|hotel|motel|hostel|guest_house|resort"](around:' + MAX_DIST + ',' + lat + ',' + lon + ');' +
+    'node["shop"~"supermarket|mall|convenience|general|pharmacy"](around:' + MAX_DIST + ',' + lat + ',' + lon + ');' +
+    'way["shop"~"supermarket|mall|convenience|general|pharmacy"](around:' + MAX_DIST + ',' + lat + ',' + lon + ');' +
+    ');out center tags;';
   const body = 'data=' + encodeURIComponent(query);
 
   let data = null;
@@ -735,14 +915,23 @@ function showErrorToast(msg){
 function loadDemoPlaces(){
   const base = { lat: 25.1195, lon: 56.3418 }; // Fujairah area
   const demos = [
-    { name: 'Al Meshwar Restaurant', dlat: 0.001, dlon: 0.002, tags: { amenity:'restaurant', cuisine:'arabic' } },
-    { name: 'Café de Paris',         dlat:-0.002, dlon: 0.001, tags: { amenity:'cafe' } },
-    { name: 'Tokyo Garden',          dlat: 0.003, dlon:-0.001, tags: { amenity:'restaurant', cuisine:'japanese' } },
-    { name: 'Burger District',       dlat:-0.001, dlon:-0.003, tags: { amenity:'fast_food', cuisine:'burger' } },
-    { name: 'The Shisha Lounge',     dlat: 0.0015,dlon: 0.004, tags: { amenity:'bar' } },
-    { name: 'Spice Route',           dlat:-0.003, dlon: 0.002, tags: { amenity:'restaurant', cuisine:'indian' } },
-    { name: 'Beachside Brunch',      dlat: 0.002, dlon:-0.002, tags: { amenity:'cafe', cuisine:'international' } },
-    { name: 'The Pizza Co.',         dlat:-0.004, dlon:-0.001, tags: { amenity:'restaurant', cuisine:'pizza' } },
+    { name: 'Al Meshwar Restaurant', dlat: 0.001,  dlon: 0.002,  tags: { amenity:'restaurant', cuisine:'arabic' } },
+    { name: 'Café de Paris',         dlat:-0.002,  dlon: 0.001,  tags: { amenity:'cafe' } },
+    { name: 'Tokyo Garden',          dlat: 0.003,  dlon:-0.001,  tags: { amenity:'restaurant', cuisine:'japanese' } },
+    { name: 'Burger District',       dlat:-0.001,  dlon:-0.003,  tags: { amenity:'fast_food', cuisine:'burger' } },
+    { name: 'The Shisha Lounge',     dlat: 0.0015, dlon: 0.004,  tags: { amenity:'bar' } },
+    { name: 'Spice Route',           dlat:-0.003,  dlon: 0.002,  tags: { amenity:'restaurant', cuisine:'indian' } },
+    { name: 'ADNOC Fuel Station',    dlat: 0.0025, dlon:-0.0035, tags: { amenity:'fuel' } },
+    { name: 'ENOC Petrol',           dlat:-0.004,  dlon: 0.003,  tags: { amenity:'fuel' } },
+    { name: 'Fujairah Fort',         dlat: 0.004,  dlon: 0.001,  tags: { tourism:'attraction' } },
+    { name: 'Heritage Village',      dlat:-0.005,  dlon:-0.002,  tags: { tourism:'museum' } },
+    { name: 'Corniche Viewpoint',    dlat: 0.0035, dlon: 0.005,  tags: { tourism:'viewpoint' } },
+    { name: 'Rotana Hotel',          dlat:-0.002,  dlon:-0.004,  tags: { tourism:'hotel' } },
+    { name: 'Fujairah Mall',         dlat: 0.005,  dlon:-0.003,  tags: { shop:'mall' } },
+    { name: 'Lulu Hypermarket',      dlat:-0.0035, dlon: 0.005,  tags: { shop:'supermarket' } },
+    { name: 'Life Pharmacy',         dlat: 0.0015, dlon:-0.002,  tags: { amenity:'pharmacy' } },
+    { name: 'Emirates NBD ATM',      dlat:-0.001,  dlon: 0.003,  tags: { amenity:'atm' } },
+    { name: 'Grand Mosque',          dlat: 0.006,  dlon: 0.002,  tags: { amenity:'place_of_worship', religion:'muslim' } },
   ];
   state.lat = base.lat; state.lon = base.lon;
   state.places = demos.map((d, i) => ({
@@ -1153,6 +1342,7 @@ async function startReal(){
   // App is ready to render immediately — GPS arrives async
   state.ready = true;
   refreshBtn.style.display = 'flex';
+  showFilterBar();
   document.getElementById('debug-toggle').style.display = 'block';
   if(!_rafRunning){ _rafRunning = true; requestAnimationFrame(renderLoop); }
 
@@ -1182,6 +1372,7 @@ function startDemo(){
   }, 50);
   state.ready = true;
   refreshBtn.style.display = 'flex';
+  showFilterBar();
   document.getElementById('debug-toggle').style.display = 'block';
   dbg('Demo mode ready');
   if(!_rafRunning){ _rafRunning = true; requestAnimationFrame(renderLoop); }
@@ -1262,6 +1453,9 @@ function renderLoop(){
   for(let rank = 0; rank < state.places.length; rank++){
     const place = state.places[rank];
     if(!state.lat) break;
+
+    // ── Filter check ──
+    if(!placePassesFilter(place)) continue;
     const bear = bearing(state.lat, state.lon, place.lat, place.lon);
     const diff = compassReady ? angleDiff(bear, heading) : angleDiff(bear, heading);
 
@@ -1304,13 +1498,8 @@ function renderLoop(){
     const pulse = rank === 0 ? 1 + 0.10 * Math.sin(now / 700) : 1;
     const r = baseSize * pulse;
 
-    // Determine solid color by amenity
-    let dotR, dotG, dotB;
-    const a = place.tags.amenity;
-    if(a === 'cafe')           { dotR=255; dotG=159; dotB=10;  }
-    else if(a === 'fast_food') { dotR=255; dotG=69;  dotB=58;  }
-    else if(a === 'bar')       { dotR=48;  dotG=209; dotB=88;  }
-    else                       { dotR=255; dotG=59;  dotB=48;  }
+    // Determine solid color by amenity / tourism / shop
+    const [dotR, dotG, dotB] = getDotColor(place.tags);
 
     // ── Solid filled dot (no stroke) ──
     ctx.beginPath();
@@ -1558,7 +1747,14 @@ refreshBtn.addEventListener('click', async () => {
     // Widen search progressively: 1500 → 3000 → 6000 → 8000m
     currentRadius = currentRadius >= 6000 ? 8000 : Math.min(currentRadius * 2, 6000);
     const r = currentRadius;
-    const query = `[out:json][timeout:30];(node["amenity"~"restaurant|cafe|fast_food|bar"](around:${r},${state.lat},${state.lon});way["amenity"~"restaurant|cafe|fast_food|bar"](around:${r},${state.lat},${state.lon}););out center tags;`;
+    const query = `[out:json][timeout:30];(` +
+      `node["amenity"~"restaurant|cafe|fast_food|bar|fuel|pharmacy|atm|bank|marketplace|place_of_worship"](around:${r},${state.lat},${state.lon});` +
+      `way["amenity"~"restaurant|cafe|fast_food|bar|fuel|pharmacy|atm|bank|marketplace|place_of_worship"](around:${r},${state.lat},${state.lon});` +
+      `node["tourism"~"attraction|museum|gallery|artwork|viewpoint|zoo|theme_park|aquarium|hotel|motel|hostel|guest_house|resort"](around:${r},${state.lat},${state.lon});` +
+      `way["tourism"~"attraction|museum|gallery|artwork|viewpoint|zoo|theme_park|aquarium|hotel|motel|hostel|guest_house|resort"](around:${r},${state.lat},${state.lon});` +
+      `node["shop"~"supermarket|mall|convenience|general|pharmacy"](around:${r},${state.lat},${state.lon});` +
+      `way["shop"~"supermarket|mall|convenience|general|pharmacy"](around:${r},${state.lat},${state.lon});` +
+      `);out center tags;`;
     const body = 'data=' + encodeURIComponent(query);
 
     statusPill.textContent = `⏳ Widening to ${(r/1000).toFixed(1)} km…`;
