@@ -411,14 +411,19 @@ const SMOOTH = 0.12;
 const FOV_H  = 65;   // assumed horizontal FOV degrees
 const MAX_DIST = 1500; // FIX: 500m too small for Fujairah/sparse cities — 1500m
 
-// Overpass mirrors — tried in order, first success wins
-// mail.ru removed (blocked by UAE ISPs); private.coffee added (reliable EU mirror)
+// Overpass mirrors — ordered by UAE reliability.
+// overpass-api.de is blocked by some UAE ISPs (fails in <1s with "Load failed").
+// kumi.systems and private.coffee are European mirrors that work reliably from UAE.
 const OVERPASS_MIRRORS = [
-  'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
   'https://overpass.private.coffee/api/interpreter',
+  'https://overpass-api.de/api/interpreter',
   'https://overpass.openstreetmap.ru/api/interpreter',
 ];
+
+// If a mirror fails in under this many ms, it's probably network-blocked (not just slow).
+// Skip it immediately rather than burning the full 30s timeout.
+const INSTANT_FAIL_MS = 2000;
 
 // ─────────────────────────────────────────────
 //  Utilities
@@ -554,9 +559,9 @@ async function fetchPlaces(lat, lon){
   for(let i = 0; i < OVERPASS_MIRRORS.length; i++){
     const mirror = OVERPASS_MIRRORS[i];
     const host = mirror.replace('https://','').split('/')[0];
-    // Show a pulsing dot so the user knows something is happening
     statusPill.textContent = '⏳ Searching ' + (i+1) + '/' + OVERPASS_MIRRORS.length + '…';
     dbg('Trying ' + host);
+    const t0 = Date.now();
     try {
       const res = await fetch(mirror, {
         method: 'POST',
@@ -564,7 +569,7 @@ async function fetchPlaces(lat, lon){
         body,
         signal: AbortSignal.timeout(30000),
       });
-      dbg('HTTP ' + res.status + ' from ' + host);
+      dbg('HTTP ' + res.status + ' from ' + host + ' (' + (Date.now()-t0) + 'ms)');
       if(!res.ok) throw new Error('HTTP ' + res.status);
       const text = await res.text();
       dbg('Body ' + text.length + ' chars');
@@ -574,8 +579,10 @@ async function fetchPlaces(lat, lon){
       if(data && Array.isArray(data.elements)) break;
       throw new Error('No elements array');
     } catch(e){
+      const elapsed = Date.now() - t0;
+      const reason = elapsed < INSTANT_FAIL_MS ? 'BLOCKED' : 'TIMEOUT/ERR';
       lastError = e.message;
-      dbg('FAIL: ' + e.message);
+      dbg('FAIL [' + reason + ' ' + elapsed + 'ms]: ' + host + ' — ' + e.message);
     }
   }
 
@@ -1462,6 +1469,7 @@ refreshBtn.addEventListener('click', async () => {
     for(let i = 0; i < OVERPASS_MIRRORS.length; i++){
       const mirror = OVERPASS_MIRRORS[i];
       statusPill.textContent = `⏳ Widening to ${(origFilter/1000).toFixed(1)} km… (${i+1}/${OVERPASS_MIRRORS.length})`;
+      const t0 = Date.now();
       try {
         const res = await fetch(mirror, { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body, signal: AbortSignal.timeout(30000) });
         if(!res.ok) continue;
