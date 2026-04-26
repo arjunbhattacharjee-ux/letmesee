@@ -822,21 +822,28 @@ async function startCamera(){
 
 // ─────────────────────────────────────────────
 //  Geolocation
-//  Strategy:
-//  • watchPosition with no timeout (avoids iOS kCLErrorDomain error 0 spam)
-//  • On POSITION_UNAVAILABLE: exponential backoff up to 30s, then STOP
-//    and wait for the page to become visible again (user switches back to tab)
-//  • On visibility restored: reset backoff and restart watch
-//  This prevents the infinite restart loop seen when iOS kills GPS in background
+//
+//  kCLErrorDomain error 0 = iOS can't get a high-accuracy GPS fix (indoors /
+//  weak signal). Strategy:
+//
+//  Phase 1 — HIGH accuracy, 2 attempts.
+//  Phase 2 — LOW accuracy (WiFi/cell tower triangulation), 2 attempts.
+//            This almost always succeeds indoors.
+//  Phase 3 — Accept a CACHED position (maximumAge up to 5 min).
+//  Phase 4 — Prompt user to enter location manually.
+//
+//  Once ANY position is accepted we keep a persistent watchPosition running
+//  at low accuracy so iOS keeps delivering updates without killing the watch.
 // ─────────────────────────────────────────────
-let gpsWatchId    = null;
-let gpsFetched    = false;
-let fetchFailed   = false;   // true if first fetch attempt produced 0 results or failed
-let gpsRetryTimer = null;
+let gpsWatchId     = null;
+let gpsFetched     = false;
+let fetchFailed    = false;
+let gpsRetryTimer  = null;
 let gpsWatchActive = false;
-let gpsFailCount  = 0;          // consecutive POSITION_UNAVAILABLE count
-const GPS_MAX_FAILS = 5;        // give up after this many consecutive fails
-const GPS_BACKOFF   = [2, 4, 8, 16, 30]; // seconds between retries
+let gpsFailCount   = 0;
+let gpsPhase       = 'high';   // 'high' | 'low' | 'cached' | 'manual'
+const GPS_HIGH_MAX = 2;        // attempts before dropping to low accuracy
+const GPS_LOW_MAX  = 2;        // attempts before trying cached position
 
 function clearGPSWatch(){
   if(gpsWatchId !== null){
@@ -850,6 +857,73 @@ function clearGPSWatch(){
   gpsWatchActive = false;
 }
 
+// ── Manual location prompt (shown after all GPS phases fail) ──
+function showManualLocationPrompt(){
+  if(document.getElementById('manual-loc-prompt')) return;
+  const overlay = document.createElement('div');
+  overlay.id = 'manual-loc-prompt';
+  overlay.style.cssText = `
+    position:fixed; inset:0; background:rgba(0,0,0,0.85);
+    display:flex; flex-direction:column; align-items:center;
+    justify-content:center; gap:16px; padding:32px;
+    text-align:center; z-index:200;
+  `;
+  overlay.innerHTML = `
+    <div style="font-size:40px">📍</div>
+    <div style="font-size:18px;font-weight:600;color:#fff">GPS unavailable indoors</div>
+    <div style="font-size:13px;color:rgba(255,255,255,0.55);max-width:280px;line-height:1.6">
+      Step outside or enter your location to find nearby places.
+    </div>
+    <input id="manual-loc-input" type="text" placeholder="e.g. Dubai Mall, Dubai"
+      style="width:100%;max-width:300px;padding:14px 16px;border-radius:12px;border:1px solid rgba(255,255,255,0.2);
+             background:rgba(255,255,255,0.08);color:#fff;font-size:15px;font-family:inherit;outline:none;" />
+    <button id="manual-loc-go" style="background:#FF3B30;color:#fff;border:none;
+      border-radius:50px;padding:14px 36px;font-size:15px;font-weight:600;
+      font-family:inherit;cursor:pointer;width:100%;max-width:300px;">Search This Location</button>
+    <button id="manual-loc-retry" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.6);
+      border:0.5px solid rgba(255,255,255,0.2);border-radius:50px;padding:12px 28px;
+      font-size:14px;font-family:inherit;cursor:pointer;width:100%;max-width:300px;">
+      Try GPS Again (go outside first)
+    </button>
+  `;
+  document.body.appendChild(overlay);
+
+  document.getElementById('manual-loc-go').addEventListener('click', async () => {
+    const query = document.getElementById('manual-loc-input').value.trim();
+    if(!query) return;
+    statusPill.textContent = 'Searching…';
+    try {
+      // Geocode with Nominatim (free, no key required)
+      const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(query);
+      const r = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+      const results = await r.json();
+      if(!results || results.length === 0){
+        statusPill.textContent = 'Location not found';
+        showErrorToast('Could not find "' + query + '". Try a more specific address.');
+        return;
+      }
+      const loc = results[0];
+      state.lat = parseFloat(loc.lat);
+      state.lon = parseFloat(loc.lon);
+      dbg('Manual geocode: ' + state.lat.toFixed(5) + ',' + state.lon.toFixed(5) + ' (' + loc.display_name + ')');
+      overlay.remove();
+      gpsFetched = true;
+      fetchPlaces(state.lat, state.lon);
+    } catch(e){
+      dbg('Geocode error: ' + e.message);
+      showErrorToast('Geocoding failed. Check connection and try again.');
+    }
+  });
+
+  document.getElementById('manual-loc-retry').addEventListener('click', () => {
+    overlay.remove();
+    gpsFailCount = 0;
+    gpsPhase = 'high';
+    clearGPSWatch();
+    startGPSWatch();
+  });
+}
+
 function startGPSWatch(){
   if(!navigator.geolocation){
     dbg('ERROR: navigator.geolocation not available');
@@ -858,14 +932,30 @@ function startGPSWatch(){
   }
   if(gpsWatchActive) return;
   gpsWatchActive = true;
-  dbg('Starting GPS watch (attempt ' + (gpsFailCount + 1) + ')…');
 
-  // Pulsing status while waiting for first fix
+  // Choose options based on current phase
+  let opts;
+  if(gpsPhase === 'high'){
+    opts = { enableHighAccuracy: true,  maximumAge: 0,       timeout: 12000 };
+    dbg('GPS phase=HIGH attempt ' + (gpsFailCount + 1) + '/' + GPS_HIGH_MAX);
+    statusPill.textContent = 'Getting GPS fix…';
+  } else if(gpsPhase === 'low'){
+    opts = { enableHighAccuracy: false, maximumAge: 0,       timeout: 12000 };
+    dbg('GPS phase=LOW (WiFi/cell) attempt ' + (gpsFailCount + 1) + '/' + GPS_LOW_MAX);
+    statusPill.textContent = 'Getting location (indoor)…';
+  } else if(gpsPhase === 'cached'){
+    opts = { enableHighAccuracy: false, maximumAge: 300000,  timeout: 8000  };
+    dbg('GPS phase=CACHED (accepting up to 5-min-old position)');
+    statusPill.textContent = 'Using last known location…';
+  }
+
+  // Pulsing dots while waiting
   let dots = 0;
+  const pulseBase = statusPill.textContent.replace(/\.+$/, '');
   const gpsTimer = setInterval(() => {
     if(state.lat !== null){ clearInterval(gpsTimer); return; }
     dots = (dots + 1) % 4;
-    statusPill.textContent = 'Waiting for GPS' + '.'.repeat(dots + 1);
+    statusPill.textContent = pulseBase + '.'.repeat(dots + 1);
   }, 600);
 
   gpsWatchId = navigator.geolocation.watchPosition(
@@ -873,80 +963,92 @@ function startGPSWatch(){
       // ── SUCCESS ──
       clearInterval(gpsTimer);
       if(gpsRetryTimer){ clearTimeout(gpsRetryTimer); gpsRetryTimer = null; }
-      gpsFailCount = 0; // reset backoff on any success
+      gpsFailCount = 0;
+      gpsPhase = 'high'; // reset phase on success
 
       const lat = pos.coords.latitude;
       const lon = pos.coords.longitude;
       const acc = Math.round(pos.coords.accuracy);
-      dbg('GPS fix: ' + lat.toFixed(5) + ',' + lon.toFixed(5) + ' acc=' + acc + 'm');
+      const age = Math.round((Date.now() - pos.timestamp) / 1000);
+      dbg('GPS fix: ' + lat.toFixed(5) + ',' + lon.toFixed(5) + ' acc=' + acc + 'm age=' + age + 's');
 
       state.lat = lat;
       state.lon = lon;
-
-      state.places.forEach(p => {
-        p.dist = haversine(state.lat, state.lon, p.lat, p.lon);
-      });
+      state.places.forEach(p => { p.dist = haversine(state.lat, state.lon, p.lat, p.lon); });
 
       if(!gpsFetched){
         gpsFetched = true;
         fetchPlaces(lat, lon);
       } else if(fetchFailed){
-        // GPS resolved again after a failed fetch — retry now
         fetchFailed = false;
         dbg('GPS re-fix after failed fetch — retrying fetchPlaces');
         fetchPlaces(lat, lon);
+      }
+
+      // Keep a low-accuracy watch alive so iOS doesn't kill GPS
+      if(opts.enableHighAccuracy){
+        clearGPSWatch();
+        gpsWatchActive = true;
+        gpsWatchId = navigator.geolocation.watchPosition(
+          p2 => {
+            state.lat = p2.coords.latitude;
+            state.lon = p2.coords.longitude;
+            state.places.forEach(p => { p.dist = haversine(state.lat, state.lon, p.lat, p.lon); });
+          },
+          () => {}, // silent errors on the keepalive watch
+          { enableHighAccuracy: false, maximumAge: 30000, timeout: 30000 }
+        );
       }
     },
     err => {
       // ── ERROR ──
       clearInterval(gpsTimer);
       const codes = {1:'PERMISSION_DENIED', 2:'POSITION_UNAVAILABLE', 3:'TIMEOUT'};
-      dbg('GPS error: ' + (codes[err.code]||'ERR_'+err.code) + ' — ' + err.message);
+      dbg('GPS error [' + gpsPhase + ']: ' + (codes[err.code]||'ERR_'+err.code));
 
       if(err.code === 1){
-        // Permission denied — fatal, stop entirely
         clearGPSWatch();
         statusPill.textContent = '📍 Location access denied';
-        showErrorToast('Location permission denied. Enable it in browser/device settings and reload.');
+        showErrorToast('Location permission denied. Enable it in Settings → Safari → Location → Allow.');
         return;
       }
 
-      // POSITION_UNAVAILABLE (2) or TIMEOUT (3) — use backoff retry
       gpsFailCount++;
       clearGPSWatch(); // sets gpsWatchActive = false
 
-      if(gpsFailCount > GPS_MAX_FAILS){
-        // Too many consecutive failures — iOS has killed GPS (background/lock screen).
-        // Stop hammering and wait for the page to become visible again.
-        dbg('GPS: ' + gpsFailCount + ' consecutive fails — pausing until page visible');
-        if(state.lat === null) statusPill.textContent = '📍 GPS unavailable — tap screen';
-        // visibilitychange listener (registered once below) will restart us
-        return;
+      // Advance phase when we've exhausted attempts at current phase
+      if(gpsPhase === 'high' && gpsFailCount >= GPS_HIGH_MAX){
+        gpsPhase = 'low';
+        gpsFailCount = 0;
+        dbg('Switching to LOW accuracy mode');
+        gpsRetryTimer = setTimeout(() => { gpsRetryTimer = null; startGPSWatch(); }, 1000);
+      } else if(gpsPhase === 'low' && gpsFailCount >= GPS_LOW_MAX){
+        gpsPhase = 'cached';
+        gpsFailCount = 0;
+        dbg('Trying cached position');
+        gpsRetryTimer = setTimeout(() => { gpsRetryTimer = null; startGPSWatch(); }, 500);
+      } else if(gpsPhase === 'cached'){
+        // All phases exhausted — show manual entry
+        dbg('All GPS phases failed — showing manual location prompt');
+        if(state.lat === null) showManualLocationPrompt();
+      } else {
+        // Retry within same phase with short delay
+        const delay = gpsPhase === 'high' ? [3,6][gpsFailCount-1]||8 : 3;
+        dbg('GPS retry in ' + delay + 's (phase=' + gpsPhase + ' fail #' + gpsFailCount + ')');
+        statusPill.textContent = 'GPS retrying…';
+        gpsRetryTimer = setTimeout(() => { gpsRetryTimer = null; startGPSWatch(); }, delay * 1000);
       }
-
-      const delay = (GPS_BACKOFF[gpsFailCount - 1] || 30);
-      dbg('GPS retry in ' + delay + 's (fail #' + gpsFailCount + ')…');
-      if(state.lat === null) statusPill.textContent = 'GPS retrying in ' + delay + 's…';
-
-      gpsRetryTimer = setTimeout(() => {
-        gpsRetryTimer = null;
-        startGPSWatch();
-      }, delay * 1000);
     },
-    {
-      enableHighAccuracy: true,
-      // No timeout — avoids the kCLErrorDomain error 0 that fires immediately
-      // after a valid fix when timeout is set on iOS Safari.
-      maximumAge: 0
-    }
+    opts
   );
 }
 
 // When the user brings the page back to foreground, reset and restart GPS
 document.addEventListener('visibilitychange', () => {
   if(document.visibilityState === 'visible' && state.ready){
-    dbg('Page visible — resetting GPS backoff');
+    dbg('Page visible — resetting GPS');
     gpsFailCount = 0;
+    gpsPhase = 'high';
     clearGPSWatch();
     startGPSWatch();
   }
@@ -957,6 +1059,7 @@ window.addEventListener('pageshow', e => {
   if(e.persisted && state.ready){
     dbg('pageshow (persisted) — restarting GPS');
     gpsFailCount = 0;
+    gpsPhase = 'high';
     clearGPSWatch();
     startGPSWatch();
   }
