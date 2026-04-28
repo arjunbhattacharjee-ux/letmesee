@@ -354,7 +354,7 @@
 <body>
 
 <!-- camera -->
-<video id="video" autoplay playsinline muted></video>
+<video id="video" autoplay playsinline webkit-playsinline muted></video>
 
 <!-- AR overlay canvas -->
 <canvas id="ar-canvas"></canvas>
@@ -367,7 +367,7 @@
 
 <!-- HUD -->
 <div id="hud">
-  <div id="app-title">AR<span>Eats</span></div>
+  <div id="app-title">AR<span>Scout</span></div>
   <div id="status-pill">Initializing…</div>
 </div>
 
@@ -412,9 +412,9 @@
 
 <!-- splash -->
 <div id="splash">
-  <div class="splash-icon">🍽️</div>
-  <div class="splash-title">AR<span>Eats</span></div>
-  <div class="splash-sub">Point your camera to discover restaurants and cafés around you in augmented reality.</div>
+  <div class="splash-icon">📍</div>
+  <div class="splash-title">AR<span>Scout</span></div>
+  <div class="splash-sub">Point your camera to discover restaurants, fuel stations, attractions, hotels and more — in augmented reality.</div>
   <button class="btn-primary" id="start-btn">Enable Camera & Location</button>
   <button class="btn-secondary" id="demo-btn">Try Demo Mode</button>
   <div style="font-size:11px;color:rgba(255,255,255,0.25);margin-top:8px">Requires HTTPS • Camera • GPS • Compass</div>
@@ -671,6 +671,26 @@ function handleFilterTap(fid){
 function showFilterBar(){
   filterBar.style.display = 'flex';
 }
+// ─────────────────────────────────────────────
+//  Canvas roundRect polyfill (iOS 15 / old WebKit)
+// ─────────────────────────────────────────────
+if(!CanvasRenderingContext2D.prototype.roundRect){
+  CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r){
+    const radius = Math.min(typeof r === 'number' ? r : r[0], w / 2, h / 2);
+    this.moveTo(x + radius, y);
+    this.lineTo(x + w - radius, y);
+    this.arcTo(x + w, y, x + w, y + radius, radius);
+    this.lineTo(x + w, y + h - radius);
+    this.arcTo(x + w, y + h, x + w - radius, y + h, radius);
+    this.lineTo(x + radius, y + h);
+    this.arcTo(x, y + h, x, y + h - radius, radius);
+    this.lineTo(x, y + radius);
+    this.arcTo(x, y, x + radius, y, radius);
+    this.closePath();
+    return this;
+  };
+}
+
 let _resizeTimer = null;
 function resizeCanvas(){
   canvas.width  = window.innerWidth;
@@ -714,9 +734,11 @@ async function fetchPlaces(lat, lon){
   fetchInFlight = true;
 
   // ── sessionStorage cache ──
-  // Key to ~300m grid. Also bust cache if user has moved >300m since last fetch.
-  const cacheKey = 'arplaces_' + lat.toFixed(3) + '_' + lon.toFixed(3);
-  const cacheMetaKey = 'arplaces_meta';
+  // v2 = query expanded to include tourism/shop/fuel etc.
+  // Increment this suffix any time the query shape changes to auto-bust stale caches.
+  const CACHE_VER = 'v2';
+  const cacheKey = 'arplaces_' + CACHE_VER + '_' + lat.toFixed(3) + '_' + lon.toFixed(3);
+  const cacheMetaKey = 'arplaces_meta_' + CACHE_VER;
   try {
     const cached = sessionStorage.getItem(cacheKey);
     const meta   = JSON.parse(sessionStorage.getItem(cacheMetaKey) || '{}');
@@ -728,7 +750,7 @@ async function fetchPlaces(lat, lon){
       const parsed = JSON.parse(cached);
       if(Array.isArray(parsed) && parsed.length > 0){
         state.places = parsed.map(p => ({ ...p, dist: haversine(lat, lon, p.lat, p.lon) }));
-        placeCount.textContent = state.places.length;
+        placeCount.textContent = state.places.filter(placePassesFilter).length;
         statusPill.textContent = state.places.length + ' places nearby (cached)';
         dbg('Cache hit — ' + state.places.length + ' places, age=' + Math.round(ageSec) + 's moved=' + Math.round(movedM) + 'm');
         fetchFailed = false;
@@ -742,7 +764,7 @@ async function fetchPlaces(lat, lon){
   } catch(e){ dbg('Cache read error: ' + e.message); }
 
   dbg('fetch lat=' + lat.toFixed(5) + ' lon=' + lon.toFixed(5) + ' r=' + MAX_DIST + 'm');
-  loadOverlay.classList.remove('active');
+  loadOverlay.classList.add('active');   // show spinner while fetching
 
   // Cancel any pending auto-retry — this fetch supersedes it
   if(fetchRetryTimer !== null){ clearTimeout(fetchRetryTimer); fetchRetryTimer = null; }
@@ -850,7 +872,7 @@ async function fetchPlaces(lat, lon){
     }
 
     state.places = sorted;
-    placeCount.textContent = sorted.length;
+    placeCount.textContent = sorted.filter(placePassesFilter).length;
     fetchFailed = false;          // Fix 7: clear failure flag on success
     currentRadius = MAX_DIST;     // Fix 5: reset radius so next Refresh starts fresh
 
@@ -873,6 +895,7 @@ async function fetchPlaces(lat, lon){
 
   } finally {
     fetchInFlight = false;   // always release guard, even if an exception is thrown
+    loadOverlay.classList.remove('active');  // always hide spinner
   }
 }
 
@@ -1036,30 +1059,36 @@ async function requestOrientationPermission(){
 //  Camera
 // ─────────────────────────────────────────────
 async function startCamera(){
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { exact: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
-      audio: false
-    });
-    video.srcObject = stream;
-  } catch(e){
-    // fallback to any rear camera
+  // On WKWebView (Chrome/Safari iOS), `exact` facingMode often throws OverconstrainedError.
+  // Try progressively softer constraints so we always get *some* camera feed.
+  const attempts = [
+    { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
+    { video: { facingMode: 'environment' }, audio: false },
+    { video: true, audio: false },
+  ];
+  for(const constraints of attempts){
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       video.srcObject = stream;
-    } catch(e2){
-      // FIX WARN: camera denied — show clear user message instead of silent black screen
-      statusPill.textContent = '📷 Camera access denied';
-      const msg = document.createElement('div');
-      msg.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;padding:24px;z-index:20;';
-      msg.innerHTML = `<div style="font-size:40px;margin-bottom:12px">📷</div>
-        <div style="font-size:16px;font-weight:500;margin-bottom:8px">Camera access needed</div>
-        <div style="font-size:13px;color:rgba(255,255,255,0.5);max-width:240px">
-          Enable camera in your browser settings and reload the page. AR overlay will run without camera feed.
-        </div>`;
-      document.body.appendChild(msg);
+      // WKWebView (Chrome/Safari iOS) requires explicit play() call
+      try { await video.play(); } catch(_){}
+      dbg('camera started with constraints: ' + JSON.stringify(constraints.video));
+      return;
+    } catch(e){
+      dbg('camera attempt failed (' + e.name + '): ' + JSON.stringify(constraints.video));
     }
   }
+  // All attempts failed — show clear message, don't leave a black screen
+  statusPill.textContent = '📷 Camera access denied';
+  const msg = document.createElement('div');
+  msg.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;padding:24px;z-index:20;';
+  msg.innerHTML = `<div style="font-size:40px;margin-bottom:12px">📷</div>
+    <div style="font-size:16px;font-weight:500;margin-bottom:8px">Camera access needed</div>
+    <div style="font-size:13px;color:rgba(255,255,255,0.5);max-width:260px;line-height:1.5">
+      Enable camera in your browser settings and reload.<br>
+      On iPhone: Settings → Chrome → Camera → Allow.
+    </div>`;
+  document.body.appendChild(msg);
 }
 
 // ─────────────────────────────────────────────
@@ -1411,7 +1440,10 @@ function renderLoop(){
   if(!state.ready) return;
   // Safety: if canvas has zero size (e.g. hidden tab) skip this frame
   if(W() === 0 || H() === 0) return;
+  try { renderFrame(); } catch(e){ dbg('renderFrame error: ' + e.message); }
+}
 
+function renderFrame(){
   ctx.clearRect(0, 0, W(), H());
   frameDots = [];
 
@@ -1722,6 +1754,11 @@ infoPanel.addEventListener('touchend', e => {
 // ─────────────────────────────────────────────
 document.getElementById('start-btn').addEventListener('click', startReal);
 document.getElementById('demo-btn').addEventListener('click', startDemo);
+
+// Purge any v1 sessionStorage cache keys left over from the old food-only query
+try {
+  Object.keys(sessionStorage).filter(k => k.startsWith('arplaces_') && !k.startsWith('arplaces_v')).forEach(k => sessionStorage.removeItem(k));
+} catch(_) {}
 
 // Debug toggle
 (function(){
