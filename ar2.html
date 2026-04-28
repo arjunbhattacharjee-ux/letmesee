@@ -485,9 +485,11 @@ const state_filters = new Set(['all']);
 // Overpass mirrors — ordered by UAE reliability.
 // overpass-api.de is blocked by some UAE ISPs (fails in <1s with "Load failed").
 // kumi.systems and private.coffee are European mirrors that work reliably from UAE.
+// corsproxy.io wraps overpass-api.de as a fallback for ISP-blocked regions.
 const OVERPASS_MIRRORS = [
   'https://overpass.kumi.systems/api/interpreter',
   'https://overpass.private.coffee/api/interpreter',
+  'https://corsproxy.io/?url=https://overpass-api.de/api/interpreter',
   'https://overpass-api.de/api/interpreter',
   'https://overpass.openstreetmap.ru/api/interpreter',
 ];
@@ -733,6 +735,16 @@ async function fetchPlaces(lat, lon){
   }
   fetchInFlight = true;
 
+  // Hard safety timeout — if fetchPlaces somehow hangs > 35s, force-hide spinner
+  const _safetyTimer = setTimeout(() => {
+    if(fetchInFlight){
+      fetchInFlight = false;
+      loadOverlay.classList.remove('active');
+      statusPill.textContent = '⚠️ Timed out — tap Refresh';
+      dbg('Safety timeout fired — fetchPlaces hung > 35s');
+    }
+  }, 35000);
+
   // ── sessionStorage cache ──
   // v2 = query expanded to include tourism/shop/fuel etc.
   // Increment this suffix any time the query shape changes to auto-bust stale caches.
@@ -894,6 +906,7 @@ async function fetchPlaces(lat, lon){
     }
 
   } finally {
+    clearTimeout(_safetyTimer);
     fetchInFlight = false;   // always release guard, even if an exception is thrown
     loadOverlay.classList.remove('active');  // always hide spinner
   }
