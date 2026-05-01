@@ -1821,41 +1821,89 @@ async function loadHeritageGuide(place) {
   wikiLink.style.display = 'none';
 
   try {
-    // Resolve city from current GPS position for more accurate Wikipedia + Llama lookups
+    // Resolve city from current GPS position for more accurate lookups
     const city = (state.lat && state.lon) ? await getCurrentCity(state.lat, state.lon) : '';
 
-    // Fetch Wikipedia
-    const wiki = await fetchWikipediaExtract(place.name, tags.wikipedia, tags, city);
+    if (guideType === 'food') {
+      // ── Food places: use web search via /api/food ──
+      await loadFoodGuide(place, city, summary, factsEl, wikiLink, card);
+    } else {
+      // ── Everything else: Wikipedia + Llama polish ──
+      const wiki = await fetchWikipediaExtract(place.name, tags.wikipedia, tags, city);
 
-    if (!wiki || !wiki.extract || wiki.extract.length < 20) {
-      card.classList.remove('visible');  // no reliable info → hide card
-      return;
-    }
-
-    // Try AI polish via /api/heritage, fallback to raw first 2 sentences
-    let polishedSummary = wiki.extract.split('. ').slice(0, 2).join('. ') + '.';
-    try {
-      const aiRes = await fetch('/api/heritage', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ placeName: place.name, extract: wiki.extract, city }),
-      });
-      if (aiRes.ok) {
-        const aiData = await aiRes.json();
-        if (aiData.summary) polishedSummary = aiData.summary;
+      if (!wiki || !wiki.extract || wiki.extract.length < 20) {
+        card.classList.remove('visible');
+        return;
       }
-    } catch (e) { /* use raw extract */ }
 
-    summary.textContent = polishedSummary;
-    factsEl.innerHTML = '';
+      let polishedSummary = wiki.extract.split('. ').slice(0, 2).join('. ') + '.';
+      try {
+        const aiRes = await fetch('/api/heritage', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ placeName: place.name, extract: wiki.extract, city }),
+        });
+        if (aiRes.ok) {
+          const aiData = await aiRes.json();
+          if (aiData.summary) polishedSummary = aiData.summary;
+        }
+      } catch (e) { /* use raw extract */ }
 
-    if (wiki.url) {
-      wikiLink.href = wiki.url;
-      wikiLink.textContent = '📖 Read full Wikipedia article →';
-      wikiLink.style.display = 'inline-flex';
+      summary.textContent = polishedSummary;
+      factsEl.innerHTML = '';
+
+      if (wiki.url) {
+        wikiLink.href = wiki.url;
+        wikiLink.textContent = '📖 Read full Wikipedia article →';
+        wikiLink.style.display = 'inline-flex';
+      }
     }
   } catch (e) {
     dbg('Guide error: ' + e.message);
+    card.classList.remove('visible');
+  }
+}
+
+// ─────────────────────────────────────────────
+//  Food guide — web search via /api/food
+// ─────────────────────────────────────────────
+async function loadFoodGuide(place, city, summary, factsEl, wikiLink, card) {
+  try {
+    const res = await fetch('/api/food', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ placeName: place.name, city, tags: place.tags }),
+    });
+
+    if (!res.ok) throw new Error('food api ' + res.status);
+    const data = await res.json();
+
+    if (!data.summary) { card.classList.remove('visible'); return; }
+
+    summary.textContent = data.summary;
+    factsEl.innerHTML = '';
+
+    // Show Zomato search link
+    const zomatoQuery = encodeURIComponent(place.name + (city ? ' ' + city : ''));
+    wikiLink.href = 'https://www.zomato.com/search?q=' + zomatoQuery;
+    wikiLink.textContent = '🍽 View on Zomato →';
+    wikiLink.style.display = 'inline-flex';
+
+    // Also show Google Maps link as fallback
+    const mapsQuery = encodeURIComponent(place.name + (city ? ', ' + city : ''));
+    const mapsLink = document.createElement('a');
+    mapsLink.href = 'https://www.google.com/search?q=' + mapsQuery + '+restaurant+review';
+    mapsLink.target = '_blank';
+    mapsLink.rel = 'noopener noreferrer';
+    mapsLink.style.cssText = wikiLink.style.cssText + ';display:inline-flex;margin-top:6px;font-size:12px;color:rgba(191,90,242,0.8);text-decoration:none;';
+    mapsLink.textContent = '🔍 Search reviews online →';
+    const existingExtra = document.getElementById('food-extra-link');
+    if (existingExtra) existingExtra.remove();
+    mapsLink.id = 'food-extra-link';
+    wikiLink.parentNode.insertBefore(mapsLink, wikiLink.nextSibling);
+
+  } catch (e) {
+    dbg('Food guide error: ' + e.message);
     card.classList.remove('visible');
   }
 }
