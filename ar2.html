@@ -951,9 +951,11 @@ async function fetchPlaces(lat, lon){
       const elLat = el.lat != null ? el.lat : (el.center && el.center.lat);
       const elLon = el.lon != null ? el.lon : (el.center && el.center.lon);
       if(elLat == null || elLon == null) return null;
+      const name = el.tags && el.tags.name && el.tags.name.trim();
+      if(!name) return null;  // skip unnamed places
       return {
         id: el.id, osmType: el.type || 'node',
-        name: (el.tags && el.tags.name) || 'Unnamed Place',
+        name,
         lat: elLat, lon: elLon,
         tags: el.tags || {},
         dist: haversine(lat, lon, elLat, elLon),
@@ -1518,34 +1520,66 @@ function renderFrame(){
     const pulse = rank === 0 ? 1 + 0.10 * Math.sin(now / 700) : 1;
     const r = baseSize * pulse;
 
+    const emoji = getTypeEmoji(place.tags);
     const [dotR, dotG, dotB] = getDotColor(place.tags);
 
+    // ── Icon bubble ──
+    const iconSize = 28 + distFactor * 8;  // 28–36 px
+    const bubbleR  = iconSize / 2 + 4;
+
+    // Glow ring
+    const glow = ctx.createRadialGradient(x, y, bubbleR * 0.5, x, y, bubbleR * 1.6);
+    glow.addColorStop(0, `rgba(${dotR},${dotG},${dotB},${alpha * 0.35})`);
+    glow.addColorStop(1, `rgba(${dotR},${dotG},${dotB},0)`);
     ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(${dotR},${dotG},${dotB},${alpha})`;
+    ctx.arc(x, y, bubbleR * 1.6, 0, Math.PI * 2);
+    ctx.fillStyle = glow;
     ctx.fill();
 
+    // Pill background
+    ctx.beginPath();
+    ctx.arc(x, y, bubbleR * pulse, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${dotR},${dotG},${dotB},${alpha * 0.85})`;
+    ctx.fill();
+
+    // Border
+    ctx.beginPath();
+    ctx.arc(x, y, bubbleR * pulse, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(255,255,255,${edgeFade * 0.55})`;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Emoji icon
+    ctx.font = `${iconSize * pulse}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+    ctx.fillText(emoji, x, y);
+    ctx.textBaseline = 'alphabetic';
+
+    // ── Name label ──
     {
       ctx.font = `600 12px 'DM Sans', sans-serif`;
       ctx.textAlign = 'center';
-      const nameW = ctx.measureText(place.name).width + 14;
-      const nameY = y - r - 8;
+      const nameW = ctx.measureText(place.name).width + 16;
+      const nameY = y - bubbleR * pulse - 10;
       ctx.beginPath();
       ctx.roundRect(x - nameW/2, nameY - 14, nameW, 18, 9);
-      ctx.fillStyle = `rgba(0,0,0,${edgeFade * 0.68})`;
+      ctx.fillStyle = `rgba(0,0,0,${edgeFade * 0.72})`;
       ctx.fill();
       ctx.fillStyle = `rgba(255,255,255,${edgeFade * alpha})`;
       ctx.fillText(place.name, x, nameY);
     }
 
+    // ── Distance label ──
     {
       ctx.font = `500 10px 'DM Sans', sans-serif`;
       ctx.textAlign = 'center';
       ctx.fillStyle = `rgba(255,255,255,${edgeFade * alpha * 0.8})`;
-      ctx.fillText(formatDist(place.dist), x, y + r + 13);
+      ctx.fillText(formatDist(place.dist), x, y + bubbleR * pulse + 14);
     }
 
-    frameDots.push({ place, x, y, r: r + 18 });
+    frameDots.push({ place, x, y, r: bubbleR * pulse + 18 });
   }
 
   if(_shouldRebuildHits(frameDots)){
