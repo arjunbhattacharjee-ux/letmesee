@@ -30,7 +30,7 @@ export default async function handler(req) {
     });
   }
 
-  const { placeName, extract } = body;
+  const { placeName, extract, city } = body;
   if (!placeName || !extract) {
     return new Response(JSON.stringify({ error: 'Missing placeName or extract' }), {
       status: 400,
@@ -38,7 +38,9 @@ export default async function handler(req) {
     });
   }
 
-  const prompt = `You are a helpful local guide. Rewrite the following description of "${placeName}" for a tourist standing right there. Use 2–3 engaging sentences. Do NOT add any facts, dates, or names that are not in the original text. Stay strictly factual.
+  const locationContext = city ? `"${placeName}" in ${city}` : `"${placeName}"`;
+
+  const prompt = `You are a helpful local guide. Rewrite the following description of ${locationContext} for a tourist standing right there. Use 2–3 engaging sentences. Do NOT add any facts, dates, or names that are not in the original text. Stay strictly factual.
 
 Original text:
 ${extract.slice(0, 1500)}
