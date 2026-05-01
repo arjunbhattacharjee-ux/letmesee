@@ -562,6 +562,7 @@ const state = {
   rawHeading: 0,
   headingReceived: false,   // true once compass fires at least once
   places: [],
+  bazingaPlaces: [],        // live local news/event spots
   demoMode: false,
   ready: false,
   permOrientation: false,
@@ -590,6 +591,7 @@ const FILTER_DEFS = [
   { id:'pharmacy',     label:'Pharmacy',     emoji:'💊', color:'#34C759', amenityMatch:['pharmacy'], shopMatch:['pharmacy'] },
   { id:'atm',          label:'ATM / Bank',   emoji:'🏦', color:'#FFD60A', amenityMatch:['atm','bank'] },
   { id:'mosque',       label:'Worship',      emoji:'🕌', color:'#AC8E68', amenityMatch:['place_of_worship'] },
+  { id:'bazinga',      label:'Bazinga',      emoji:'⚡', color:'#FFD60A', isBazinga: true },
 ];
 
 // Active filter IDs — multi-select; 'all' is the default catch-all
@@ -711,11 +713,15 @@ function getDotColor(tags){
 }
 
 function placePassesFilter(place){
+  // Bazinga places are never OSM places — handle separately
+  if(place.isBazinga) return state_filters.has('all') || state_filters.has('bazinga');
+  // Bazinga-only filter hides normal places
+  if(state_filters.size === 1 && state_filters.has('bazinga')) return false;
   if(state_filters.has('all')) return true;
   const tags = place.tags;
   for(const fid of state_filters){
     const def = FILTER_DEFS.find(f => f.id === fid);
-    if(!def) continue;
+    if(!def || def.isBazinga) continue;
     if(def.amenityMatch && tags.amenity && def.amenityMatch.includes(tags.amenity)) return true;
     if(def.tourismMatch && tags.tourism && def.tourismMatch.includes(tags.tourism)) return true;
     if(def.shopMatch    && tags.shop    && def.shopMatch.includes(tags.shop))       return true;
@@ -987,6 +993,9 @@ async function fetchPlaces(lat, lon){
       showCalibToast();
     }
 
+    // Fetch Bazinga (local news/events) in background — don't block main flow
+    fetchBazingaPlaces(lat, lon).catch(e => dbg('Bazinga fetch error: ' + e.message));
+
   } finally {
     clearTimeout(_safetyTimer);
     fetchInFlight = false;
@@ -1053,6 +1062,12 @@ function loadDemoPlaces(){
   }));
   placeCount.textContent = state.places.length;
   statusPill.textContent = 'Demo mode – rotate phone';
+  // Demo bazinga spots
+  state.bazingaPlaces = [
+    { id:'bz1', isBazinga:true, name:'Street Market Closed', headline:'Weekend market temporarily shut by municipality', summary:'The popular weekend street market near the waterfront has been temporarily closed by municipal authorities for a routine safety inspection. Expected to reopen next Friday.', category:'Local News', lat: base.lat+0.002, lon: base.lon+0.003, dist: haversine(base.lat, base.lon, base.lat+0.002, base.lon+0.003), tags:{} },
+    { id:'bz2', isBazinga:true, name:'Cultural Festival', headline:'Annual heritage festival kicks off this weekend', summary:'The city's annual cultural heritage festival begins this Saturday with traditional music, food stalls, and craft exhibitions at the central plaza. Free entry for all.', category:'Events', lat: base.lat-0.003, lon: base.lon+0.004, dist: haversine(base.lat, base.lon, base.lat-0.003, base.lon+0.004), tags:{} },
+    { id:'bz3', isBazinga:true, name:'Road Works Alert', headline:'Major road closure affects city centre traffic', summary:'A key intersection near the commercial district will be closed for 3 days starting Monday for emergency pipe repairs. Drivers advised to use alternate routes.', category:'Traffic', lat: base.lat+0.004, lon: base.lon-0.002, dist: haversine(base.lat, base.lon, base.lat+0.004, base.lon-0.002), tags:{} },
+  ];
 }
 
 // ─────────────────────────────────────────────
@@ -1402,6 +1417,7 @@ async function startReal(){
 
   startGPSWatch();
   dbg('App ready. Waiting for GPS fix…');
+  // Bazinga fetch will be triggered once GPS resolves in fetchPlaces
 }
 
 function startDemo(){
@@ -1487,8 +1503,11 @@ function renderFrame(){
   const bandH = (H() * 0.60) / BANDS;
   const topY  = H() * 0.20;
 
-  for(let rank = 0; rank < state.places.length; rank++){
-    const place = state.places[rank];
+  // Merge OSM places + bazinga spots into one render list
+  const allRenderPlaces = [...state.places, ...state.bazingaPlaces];
+
+  for(let rank = 0; rank < allRenderPlaces.length; rank++){
+    const place = allRenderPlaces[rank];
     if(!state.lat) break;
     if(!placePassesFilter(place)) continue;
     const bear = bearing(state.lat, state.lon, place.lat, place.lon);
@@ -1520,37 +1539,42 @@ function renderFrame(){
     const pulse = rank === 0 ? 1 + 0.10 * Math.sin(now / 700) : 1;
     const r = baseSize * pulse;
 
-    const emoji = getTypeEmoji(place.tags);
-    const [dotR, dotG, dotB] = getDotColor(place.tags);
+    const isBazinga = !!place.isBazinga;
+    const emoji = isBazinga ? '⚡' : getTypeEmoji(place.tags);
+    const [dotR, dotG, dotB] = isBazinga ? [255, 214, 10] : getDotColor(place.tags);
 
     // ── Icon bubble ──
-    const iconSize = 28 + distFactor * 8;  // 28–36 px
+    const iconSize = isBazinga ? 32 + distFactor * 6 : 28 + distFactor * 8;
     const bubbleR  = iconSize / 2 + 4;
+    // Bazinga: extra aggressive pulse to draw attention
+    const bazingaPulse = isBazinga ? 1 + 0.18 * Math.sin(now / 400) : 1;
+    const effectivePulse = pulse * bazingaPulse;
 
     // Glow ring
-    const glow = ctx.createRadialGradient(x, y, bubbleR * 0.5, x, y, bubbleR * 1.6);
-    glow.addColorStop(0, `rgba(${dotR},${dotG},${dotB},${alpha * 0.35})`);
+    const glowRadius = isBazinga ? bubbleR * 2.2 : bubbleR * 1.6;
+    const glow = ctx.createRadialGradient(x, y, bubbleR * 0.5, x, y, glowRadius);
+    glow.addColorStop(0, `rgba(${dotR},${dotG},${dotB},${alpha * (isBazinga ? 0.55 : 0.35)})`);
     glow.addColorStop(1, `rgba(${dotR},${dotG},${dotB},0)`);
     ctx.beginPath();
-    ctx.arc(x, y, bubbleR * 1.6, 0, Math.PI * 2);
+    ctx.arc(x, y, glowRadius, 0, Math.PI * 2);
     ctx.fillStyle = glow;
     ctx.fill();
 
     // Pill background
     ctx.beginPath();
-    ctx.arc(x, y, bubbleR * pulse, 0, Math.PI * 2);
+    ctx.arc(x, y, bubbleR * effectivePulse, 0, Math.PI * 2);
     ctx.fillStyle = `rgba(${dotR},${dotG},${dotB},${alpha * 0.85})`;
     ctx.fill();
 
     // Border
     ctx.beginPath();
-    ctx.arc(x, y, bubbleR * pulse, 0, Math.PI * 2);
-    ctx.strokeStyle = `rgba(255,255,255,${edgeFade * 0.55})`;
-    ctx.lineWidth = 1.5;
+    ctx.arc(x, y, bubbleR * effectivePulse, 0, Math.PI * 2);
+    ctx.strokeStyle = isBazinga ? `rgba(255,255,255,${edgeFade * 0.9})` : `rgba(255,255,255,${edgeFade * 0.55})`;
+    ctx.lineWidth = isBazinga ? 2 : 1.5;
     ctx.stroke();
 
     // Emoji icon
-    ctx.font = `${iconSize * pulse}px sans-serif`;
+    ctx.font = `${iconSize * effectivePulse}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = `rgba(255,255,255,${alpha})`;
@@ -1559,15 +1583,15 @@ function renderFrame(){
 
     // ── Name label ──
     {
-      ctx.font = `600 12px 'DM Sans', sans-serif`;
+      ctx.font = isBazinga ? `700 12px 'DM Sans', sans-serif` : `600 12px 'DM Sans', sans-serif`;
       ctx.textAlign = 'center';
       const nameW = ctx.measureText(place.name).width + 16;
-      const nameY = y - bubbleR * pulse - 10;
+      const nameY = y - bubbleR * effectivePulse - 10;
       ctx.beginPath();
       ctx.roundRect(x - nameW/2, nameY - 14, nameW, 18, 9);
-      ctx.fillStyle = `rgba(0,0,0,${edgeFade * 0.72})`;
+      ctx.fillStyle = isBazinga ? `rgba(30,20,0,${edgeFade * 0.85})` : `rgba(0,0,0,${edgeFade * 0.72})`;
       ctx.fill();
-      ctx.fillStyle = `rgba(255,255,255,${edgeFade * alpha})`;
+      ctx.fillStyle = isBazinga ? `rgba(255,214,10,${edgeFade * alpha})` : `rgba(255,255,255,${edgeFade * alpha})`;
       ctx.fillText(place.name, x, nameY);
     }
 
@@ -1576,10 +1600,10 @@ function renderFrame(){
       ctx.font = `500 10px 'DM Sans', sans-serif`;
       ctx.textAlign = 'center';
       ctx.fillStyle = `rgba(255,255,255,${edgeFade * alpha * 0.8})`;
-      ctx.fillText(formatDist(place.dist), x, y + bubbleR * pulse + 14);
+      ctx.fillText(formatDist(place.dist), x, y + bubbleR * effectivePulse + 14);
     }
 
-    frameDots.push({ place, x, y, r: bubbleR * pulse + 18 });
+    frameDots.push({ place, x, y, r: bubbleR * effectivePulse + 18 });
   }
 
   if(_shouldRebuildHits(frameDots)){
@@ -1623,6 +1647,41 @@ function rebuildHitTargets(){
       el.ontouchend = e => { e.preventDefault(); handler(); };
     }
   });
+}
+
+// ─────────────────────────────────────────────
+//  Bazinga — local news/events fetch
+// ─────────────────────────────────────────────
+async function fetchBazingaPlaces(lat, lon) {
+  if(state.demoMode) return;  // demo has hardcoded spots
+  try {
+    const city = await getCurrentCity(lat, lon);
+    dbg('Bazinga fetch for: ' + (city || lat.toFixed(3) + ',' + lon.toFixed(3)));
+    const res = await fetch('/api/bazinga', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lat, lon, city }),
+    });
+    if(!res.ok){ dbg('Bazinga API error: ' + res.status); return; }
+    const data = await res.json();
+    if(!Array.isArray(data.spots) || data.spots.length === 0){ dbg('Bazinga: no spots returned'); return; }
+    state.bazingaPlaces = data.spots.map((s, i) => ({
+      id: 'bz_' + i,
+      isBazinga: true,
+      name: s.name || s.headline || 'Local Update',
+      headline: s.headline || s.name,
+      summary: s.summary || '',
+      category: s.category || 'News',
+      url: s.url || null,
+      lat: s.lat,
+      lon: s.lon,
+      dist: haversine(lat, lon, s.lat, s.lon),
+      tags: {},
+    }));
+    dbg('Bazinga loaded: ' + state.bazingaPlaces.length + ' spots');
+  } catch(e) {
+    dbg('fetchBazingaPlaces: ' + e.message);
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -1913,6 +1972,38 @@ async function loadFoodGuide(place, city, summary, factsEl, wikiLink, card) {
 // ─────────────────────────────────────────────
 function openPanel(place){
   const tags = place.tags;
+
+  // ── Bazinga: news panel ──
+  if(place.isBazinga){
+    document.getElementById('panel-category').textContent = '⚡ BAZINGA · ' + (place.category || 'Local News').toUpperCase();
+    document.getElementById('panel-name').textContent = place.headline || place.name;
+    document.getElementById('panel-dist').textContent = formatDist(place.dist) + ' away';
+    const tagRow = document.getElementById('panel-tags');
+    tagRow.innerHTML = '';
+    const catSpan = document.createElement('span');
+    catSpan.className = 'tag';
+    catSpan.textContent = place.category || 'News';
+    tagRow.appendChild(catSpan);
+    const rows = document.getElementById('panel-rows');
+    rows.innerHTML = '';
+    const summaryRow = document.createElement('div');
+    summaryRow.style.cssText = 'font-size:14px;line-height:1.65;color:rgba(255,255,255,0.85);padding:10px 0;';
+    summaryRow.textContent = place.summary || '';
+    rows.appendChild(summaryRow);
+    if(place.url){
+      const a = document.createElement('a');
+      a.href = place.url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+      a.style.cssText = 'display:inline-flex;align-items:center;gap:5px;margin-top:6px;font-size:12px;color:#FFD60A;text-decoration:none;';
+      a.textContent = '🔗 Read full story →';
+      rows.appendChild(a);
+    }
+    const card = document.getElementById('heritage-card');
+    card.classList.remove('visible');
+    const dirBtn = document.getElementById('directions-btn');
+    dirBtn.classList.remove('visible');
+    infoPanel.classList.add('open');
+    return;
+  }
 
   document.getElementById('panel-category').textContent =
     getTypeEmoji(tags) + ' ' + formatCategory(tags).toUpperCase();
