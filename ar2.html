@@ -255,6 +255,90 @@
     line-height: 1;
   }
 
+  /* ── Heritage Guide (AI fact card) ── */
+  #heritage-card {
+    margin-top: 16px;
+    background: linear-gradient(135deg, rgba(191,90,242,0.15), rgba(10,132,255,0.12));
+    border: 0.5px solid rgba(191,90,242,0.35);
+    border-radius: 14px;
+    padding: 14px 16px;
+    display: none;
+  }
+  #heritage-card.visible { display: block; }
+
+  .heritage-header {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 10px;
+  }
+  .heritage-badge {
+    font-size: 10px; font-weight: 700;
+    letter-spacing: 1px; text-transform: uppercase;
+    color: #bf5af2;
+    background: rgba(191,90,242,0.15);
+    border: 0.5px solid rgba(191,90,242,0.4);
+    border-radius: 20px;
+    padding: 3px 9px;
+  }
+  .heritage-powered {
+    font-size: 10px; color: rgba(255,255,255,0.3);
+    margin-left: auto;
+  }
+
+  #heritage-summary {
+    font-size: 14px; line-height: 1.65;
+    color: rgba(255,255,255,0.85);
+    margin-bottom: 12px;
+  }
+
+  .heritage-facts {
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .heritage-fact {
+    display: flex; gap: 10px; align-items: flex-start;
+    background: rgba(255,255,255,0.04);
+    border-radius: 10px;
+    padding: 9px 12px;
+  }
+  .heritage-fact-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+  .heritage-fact-text { font-size: 13px; color: rgba(255,255,255,0.75); line-height: 1.5; }
+  .heritage-fact-text strong { color: #fff; display: block; font-size: 12px;
+    text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
+
+  .heritage-loading {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 13px; color: rgba(255,255,255,0.45);
+    padding: 4px 0;
+  }
+  .heritage-spinner {
+    width: 16px; height: 16px; flex-shrink: 0;
+    border: 2px solid rgba(191,90,242,0.25);
+    border-top-color: #bf5af2;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  #heritage-wiki-link {
+    display: inline-flex; align-items: center; gap: 5px;
+    margin-top: 12px;
+    font-size: 12px; color: rgba(191,90,242,0.8);
+    text-decoration: none;
+  }
+  #heritage-wiki-link:hover { color: #bf5af2; }
+
+  /* ── Directions button ── */
+  #directions-btn {
+    display: none;
+    width: 100%; margin-top: 14px;
+    background: linear-gradient(135deg, #0a84ff, #0066cc);
+    color: #fff; border: none;
+    font-family: var(--font); font-size: 15px; font-weight: 600;
+    padding: 14px; border-radius: 14px;
+    cursor: pointer; align-items: center; justify-content: center; gap: 8px;
+    transition: opacity 0.15s;
+  }
+  #directions-btn.visible { display: flex; }
+  #directions-btn:active { opacity: 0.85; }
+
   /* ── calibration toast ── */
   #calib-toast {
     position: fixed; top: 80px; left: 50%; transform: translateX(-50%);
@@ -402,6 +486,22 @@
   <div class="dist-badge"><span>📍</span><span id="panel-dist"></span></div>
   <div class="tag-row" id="panel-tags"></div>
   <div id="panel-rows"></div>
+
+  <!-- Heritage AI Guide card — shown for tourism/attraction places -->
+  <div id="heritage-card">
+    <div class="heritage-header">
+      <span class="heritage-badge">✦ Heritage Guide</span>
+      <span class="heritage-powered">Llama 3 via Groq</span>
+    </div>
+    <div id="heritage-summary"></div>
+    <div class="heritage-facts" id="heritage-facts"></div>
+    <a id="heritage-wiki-link" href="#" target="_blank" rel="noopener noreferrer">
+      📖 Read full Wikipedia article →
+    </a>
+  </div>
+
+  <!-- Directions button -->
+  <button id="directions-btn">🗺 Get Directions</button>
 </div>
 
 <!-- loading -->
@@ -1639,6 +1739,171 @@ function rebuildHitTargets(){
 }
 
 // ─────────────────────────────────────────────
+//  Heritage Guide — Wikipedia + Groq/Llama AI
+// ─────────────────────────────────────────────
+
+// Paste your free Groq API key here: https://console.groq.com/keys
+const GROQ_API_KEY = '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';
+
+// OSM tourism/attraction tags that trigger Heritage Guide
+const HERITAGE_TAGS = new Set([
+  'attraction','museum','gallery','artwork','viewpoint',
+  'zoo','theme_park','aquarium','castle','monument','ruins',
+  'heritage','archaeological_site','historic'
+]);
+
+function isHeritagePlace(tags){
+  if(tags.tourism && HERITAGE_TAGS.has(tags.tourism)) return true;
+  if(tags.historic) return true;
+  if(tags.amenity === 'place_of_worship') return true;
+  return false;
+}
+
+// Cache so we don't re-fetch on every panel open
+const _heritageCache = {};
+
+async function fetchWikipediaExtract(placeName, wikitag){
+  // Prefer OSM wikipedia tag (e.g. "en:Amber Fort") if available
+  let title = wikitag
+    ? wikitag.replace(/^[a-z]{2}:/, '')
+    : placeName;
+
+  const params = new URLSearchParams({
+    action: 'query',
+    titles: title,
+    prop: 'extracts|info',
+    exintro: '1',
+    explaintext: '1',
+    inprop: 'url',
+    redirects: '1',
+    format: 'json',
+    origin: '*',
+  });
+
+  const res = await fetch('https://en.wikipedia.org/w/api.php?' + params);
+  const data = await res.json();
+  const pages = data.query?.pages || {};
+  const page  = Object.values(pages)[0];
+
+  if(!page || page.missing !== undefined) return null;
+
+  return {
+    title:   page.title,
+    extract: page.extract?.slice(0, 3000) || '', // cap at 3000 chars for Llama context
+    url:     page.fullurl || `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title)}`,
+  };
+}
+
+async function askLlama(wikiExtract, placeName){
+  if(!GROQ_API_KEY || GROQ_API_KEY === 'YOUR_GROQ_API_KEY_HERE'){
+    // Graceful fallback: show Wikipedia extract summary without AI
+    const sentences = wikiExtract.extract.split('. ').slice(0, 3).join('. ') + '.';
+    return {
+      summary: sentences,
+      facts: [
+        { icon: '📖', label: 'Source', text: 'Wikipedia — tap the link below for the full article.' }
+      ]
+    };
+  }
+
+  const prompt = `You are a knowledgeable heritage guide. Based on this Wikipedia extract about "${placeName}", generate a JSON response with:
+1. A "summary": 2 sentences — engaging, informative, written for a tourist standing at the site right now.
+2. "facts": array of 3-4 objects, each with:
+   - "icon": a relevant emoji
+   - "label": short bold label (e.g. "Built", "Style", "Fun Fact", "Significance")
+   - "text": 1-2 sentences of interesting detail
+
+Wikipedia extract:
+${wikiExtract.extract}
+
+Respond ONLY with valid JSON. No markdown, no explanation.`;
+
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + GROQ_API_KEY,
+    },
+    body: JSON.stringify({
+      model: 'llama-3.3-70b-versatile',
+      max_tokens: 500,
+      temperature: 0.7,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+
+  if(!res.ok) throw new Error('Groq API error: ' + res.status);
+  const data = await res.json();
+  const raw  = data.choices?.[0]?.message?.content || '{}';
+
+  // Strip markdown fences if model added them
+  const clean = raw.replace(/```json|```/g, '').trim();
+  return JSON.parse(clean);
+}
+
+async function loadHeritageGuide(place){
+  const card    = document.getElementById('heritage-card');
+  const summary = document.getElementById('heritage-summary');
+  const facts   = document.getElementById('heritage-facts');
+  const wikiLink= document.getElementById('heritage-wiki-link');
+
+  // Show card with loading state
+  card.classList.add('visible');
+  summary.innerHTML = '<div class="heritage-loading"><div class="heritage-spinner"></div>Loading heritage guide…</div>';
+  facts.innerHTML = '';
+  wikiLink.style.display = 'none';
+
+  const cacheKey = place.name + '_' + (place.tags.wikipedia || '');
+  if(_heritageCache[cacheKey]){
+    renderHeritageCard(_heritageCache[cacheKey], card, summary, facts, wikiLink);
+    return;
+  }
+
+  try {
+    // 1. Fetch Wikipedia
+    const wiki = await fetchWikipediaExtract(place.name, place.tags.wikipedia);
+    if(!wiki){
+      summary.textContent = 'No Wikipedia article found for this location.';
+      return;
+    }
+
+    // 2. Ask Llama via Groq
+    const aiResult = await askLlama(wiki, place.name);
+    const result = { ...aiResult, wikiUrl: wiki.url, wikiTitle: wiki.title };
+    _heritageCache[cacheKey] = result;
+    renderHeritageCard(result, card, summary, facts, wikiLink);
+
+  } catch(e){
+    dbg('Heritage guide error: ' + e.message);
+    summary.textContent = 'Could not load heritage information. Check your connection.';
+  }
+}
+
+function renderHeritageCard(result, card, summary, facts, wikiLink){
+  // Summary
+  summary.textContent = result.summary || '';
+
+  // Fact chips
+  facts.innerHTML = '';
+  (result.facts || []).forEach(f => {
+    const div = document.createElement('div');
+    div.className = 'heritage-fact';
+    div.innerHTML = `
+      <span class="heritage-fact-icon">${f.icon || '💡'}</span>
+      <span class="heritage-fact-text"><strong>${f.label || ''}</strong>${f.text || ''}</span>
+    `;
+    facts.appendChild(div);
+  });
+
+  // Wikipedia link
+  if(result.wikiUrl){
+    wikiLink.href = result.wikiUrl;
+    wikiLink.textContent = '📖 Read full article: ' + (result.wikiTitle || 'Wikipedia') + ' →';
+    wikiLink.style.display = 'inline-flex';
+  }
+}
+
+// ─────────────────────────────────────────────
 //  Info panel
 // ─────────────────────────────────────────────
 function openPanel(place){
@@ -1747,6 +2012,21 @@ function openPanel(place){
   if(tags.wheelchair === 'yes') addText('♿', 'Accessibility', 'Wheelchair accessible');
   if(tags.wifi === 'yes' || tags.internet_access === 'wlan') addText('📶', 'WiFi', 'Available');
   osmLink();
+
+  // ── Heritage Guide (tourism/attraction places only) ──
+  const heritageCard = document.getElementById('heritage-card');
+  heritageCard.classList.remove('visible');
+  if(isHeritagePlace(tags)){
+    loadHeritageGuide(place);
+  }
+
+  // ── Directions button (all places) ──
+  const dirBtn = document.getElementById('directions-btn');
+  dirBtn.classList.add('visible');
+  dirBtn.onclick = () => {
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${place.lat},${place.lon}&destination_place_id=&travelmode=walking`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
 
   infoPanel.classList.add('open');
 }
