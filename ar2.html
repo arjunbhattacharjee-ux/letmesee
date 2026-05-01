@@ -554,6 +554,20 @@
 
 <script>
 // ─────────────────────────────────────────────
+//  Global error guard — surface silent crashes
+// ─────────────────────────────────────────────
+window.addEventListener('error', function(e){
+  const pill = document.getElementById('status-pill');
+  if(pill) pill.textContent = '⚠️ JS error — see console';
+  console.error('[ARScout crash]', e.message, e.filename, e.lineno);
+});
+window.addEventListener('unhandledrejection', function(e){
+  const pill = document.getElementById('status-pill');
+  if(pill) pill.textContent = '⚠️ Error: ' + (e.reason?.message || e.reason || 'unknown');
+  console.error('[ARScout unhandled promise]', e.reason);
+});
+
+// ─────────────────────────────────────────────
 //  State
 // ─────────────────────────────────────────────
 const state = {
@@ -729,19 +743,27 @@ function placePassesFilter(place){
   return false;
 }
 
-const video      = document.getElementById('video');
-const canvas     = document.getElementById('ar-canvas');
-const ctx        = canvas.getContext('2d');
-const dotLayer   = document.getElementById('dot-layer');
-const splash     = document.getElementById('splash');
-const statusPill = document.getElementById('status-pill');
-const loadOverlay= document.getElementById('loading-overlay');
-const infoPanel  = document.getElementById('info-panel');
-const compassSVG = document.getElementById('compass-svg');
-const calibToast = document.getElementById('calib-toast');
-const placeCount = document.getElementById('place-count');
-const refreshBtn = document.getElementById('refresh-btn');
-const filterBar  = document.getElementById('filter-bar');
+// DOM refs — populated in initApp() below
+let video, canvas, ctx, dotLayer, splash, statusPill,
+    loadOverlay, infoPanel, compassSVG, calibToast,
+    placeCount, refreshBtn, filterBar;
+
+let currentRadius = MAX_DIST;
+function initApp(){
+  video       = document.getElementById('video');
+  canvas      = document.getElementById('ar-canvas');
+  if(!canvas){ console.error('ar-canvas not found'); return; }
+  ctx         = canvas.getContext('2d');
+  dotLayer    = document.getElementById('dot-layer');
+  splash      = document.getElementById('splash');
+  statusPill  = document.getElementById('status-pill');
+  loadOverlay = document.getElementById('loading-overlay');
+  infoPanel   = document.getElementById('info-panel');
+  compassSVG  = document.getElementById('compass-svg');
+  calibToast  = document.getElementById('calib-toast');
+  placeCount  = document.getElementById('place-count');
+  refreshBtn  = document.getElementById('refresh-btn');
+  filterBar   = document.getElementById('filter-bar');
 
 // ─────────────────────────────────────────────
 //  Filter bar
@@ -1142,6 +1164,11 @@ async function requestOrientationPermission(){
 }
 
 async function startCamera(){
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    dbg('camera: mediaDevices API not available (needs HTTPS?)');
+    statusPill.textContent = '📷 Camera unavailable';
+    return;
+  }
   const attempts = [
     { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
     { video: { facingMode: 'environment' }, audio: false },
@@ -1153,12 +1180,14 @@ async function startCamera(){
       video.srcObject = stream;
       try { await video.play(); } catch(_){}
       dbg('camera started');
+      statusPill.textContent = 'Camera ready…';
       return;
     } catch(e){
-      dbg('camera attempt failed (' + e.name + ')');
+      dbg('camera attempt failed: ' + e.name + ' — ' + e.message);
     }
   }
-  statusPill.textContent = '📷 Camera access denied';
+  statusPill.textContent = '📷 Camera denied — demo mode recommended';
+  showErrorToast('Camera access denied or unavailable. Tap "Try Demo Mode" to explore without camera.');
 }
 
 // ─────────────────────────────────────────────
@@ -1392,22 +1421,29 @@ window.addEventListener('pageshow', e => {
 //  App start
 // ─────────────────────────────────────────────
 async function startReal(){
-  if(location.protocol !== 'https:' && location.hostname !== 'localhost'){
-    splash.style.display = 'none';
-    const msg = document.createElement('div');
-    msg.style.cssText = 'position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:40px;text-align:center;background:#0a0a0c;z-index:200;';
-    msg.innerHTML = '<div style="font-size:40px">🔒</div><div style="font-size:18px;font-weight:600">HTTPS required</div><div style="font-size:14px;color:rgba(255,255,255,0.5);max-width:280px">Camera, GPS, and compass only work on secure (HTTPS) connections.</div>';
-    document.body.appendChild(msg);
-    return;
+  splash.style.display = 'none';
+
+  // HTTPS warning — show but don't block; camera will fail gracefully if needed
+  const isSecure = location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  if(!isSecure){
+    const warn = document.createElement('div');
+    warn.style.cssText = 'position:fixed;top:0;left:0;right:0;background:rgba(255,59,48,0.92);color:#fff;font-size:13px;padding:10px 16px;text-align:center;z-index:200;';
+    warn.textContent = '⚠️ HTTPS required for camera & GPS. Some features may not work.';
+    document.body.appendChild(warn);
+    setTimeout(() => warn.remove(), 6000);
   }
 
-  splash.style.display = 'none';
   statusPill.textContent = 'Requesting camera…';
 
-  await Promise.all([
-    startCamera(),
-    requestOrientationPermission()
-  ]);
+  // Run camera + compass in parallel — wrap each so one failure doesn't kill the other
+  try {
+    await Promise.all([
+      startCamera().catch(e => dbg('camera init error: ' + e.message)),
+      requestOrientationPermission().catch(e => dbg('orientation init error: ' + e.message)),
+    ]);
+  } catch(e) {
+    dbg('startReal error: ' + e.message);
+  }
 
   state.ready = true;
   refreshBtn.style.display = 'flex';
@@ -2126,25 +2162,38 @@ infoPanel.addEventListener('touchend', e => {
 document.getElementById('start-btn').addEventListener('click', startReal);
 document.getElementById('demo-btn').addEventListener('click', startDemo);
 
-try {
-  Object.keys(sessionStorage).filter(k => k.startsWith('arplaces_') && !k.startsWith('arplaces_v')).forEach(k => sessionStorage.removeItem(k));
-} catch(_) {}
+  // sessionStorage cleanup
+  try {
+    Object.keys(sessionStorage).filter(k => k.startsWith('arplaces_') && !k.startsWith('arplaces_v')).forEach(k => sessionStorage.removeItem(k));
+  } catch(_) {}
 
-// Debug toggle
-(function(){
-  const btn = document.getElementById('debug-toggle');
-  const panel = document.getElementById('debug-panel');
-  btn.addEventListener('click', function(){
-    const visible = panel.style.display !== 'none';
-    panel.style.display = visible ? 'none' : 'block';
-    btn.textContent = visible ? '🔍 Debug' : '❌ Close';
+  // Debug toggle
+  (function(){
+    const btn = document.getElementById('debug-toggle');
+    const panel = document.getElementById('debug-panel');
+    if(btn && panel){
+      btn.addEventListener('click', function(){
+        const visible = panel.style.display !== 'none';
+        panel.style.display = visible ? 'none' : 'block';
+        btn.textContent = visible ? '🔍 Debug' : '❌ Close';
+      });
+    }
+  })();
+
+  // Refresh button
+  currentRadius = MAX_DIST;
+  refreshBtn.addEventListener('click', async () => {
+    // ... (same refresh logic as original)
   });
-})();
 
-let currentRadius = MAX_DIST;
-refreshBtn.addEventListener('click', async () => {
-  // ... (same refresh logic as original)
-});
+} // end initApp
+
+// Boot — runs after DOM is ready
+if(document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', initApp);
+} else {
+  initApp();
+}
 
 // ─────────────────────────────────────────────
 //  roundRect polyfill (fallback)
