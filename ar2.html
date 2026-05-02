@@ -1856,7 +1856,7 @@ async function _wikiByTitle(title) {
 }
 
 // ─────────────────────────────────────────────
-//  Guide card (Wikipedia + optional AI polish)
+//  Guide card — Llama via /api/food and /api/heritage
 // ─────────────────────────────────────────────
 function getGuideType(tags){
   if(tags.tourism && ['attraction','museum','gallery','artwork','viewpoint','zoo','theme_park','aquarium','castle','monument','ruins','heritage','archaeological_site','historic'].includes(tags.tourism)) return 'heritage';
@@ -1892,59 +1892,135 @@ function getGuideClass(type){
   return '';
 }
 
+// Parse "FACT:" lines out of Llama response
+function parseGroqResponse(raw) {
+  if (!raw) return { summary: null, facts: [] };
+  const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+  const facts = [];
+  const summaryLines = [];
+  for (const line of lines) {
+    if (line.startsWith('FACT:')) {
+      facts.push(line.replace(/^FACT:\s*/i, ''));
+    } else if (facts.length === 0) {
+      summaryLines.push(line);
+    }
+  }
+  return { summary: summaryLines.join(' ') || null, facts };
+}
+
+// Render fun-fact chips
+function renderFacts(factsEl, facts, guideType) {
+  factsEl.innerHTML = '';
+  if (!facts || facts.length === 0) return;
+  const icons = {
+    food: ['🍴','💡'], hotel: ['🛎','💡'], heritage: ['🏛','⭐'],
+    shop: ['🛍','💡'], fuel: ['⛽','💡'], pharmacy: ['💊','💡'],
+    bank: ['💳','💡'], general: ['📍','💡'],
+  };
+  const [ic1, ic2] = icons[guideType] || ['📍','💡'];
+  facts.slice(0, 2).forEach((fact, i) => {
+    const div = document.createElement('div');
+    div.className = 'heritage-fact';
+    div.innerHTML = '<span class="heritage-fact-icon">' + (i === 0 ? ic1 : ic2) + '</span><span class="heritage-fact-text">' + fact + '</span>';
+    factsEl.appendChild(div);
+  });
+}
+
 async function loadHeritageGuide(place) {
-  const card         = document.getElementById('heritage-card');
-  const badge        = document.getElementById('guide-badge');
-  const summary      = document.getElementById('heritage-summary');
-  const factsEl      = document.getElementById('heritage-facts');
-  const wikiLink     = document.getElementById('heritage-wiki-link');
-  const tags         = place.tags;
+  const card     = document.getElementById('heritage-card');
+  const badge    = document.getElementById('guide-badge');
+  const summary  = document.getElementById('heritage-summary');
+  const factsEl  = document.getElementById('heritage-facts');
+  const wikiLink = document.getElementById('heritage-wiki-link');
+  const tags     = place.tags;
 
-  const guideType    = getGuideType(tags);
-  const guideLabel   = getGuideLabel(guideType);
-  const guideClass   = getGuideClass(guideType);
+  const guideType  = getGuideType(tags);
+  const guideLabel = getGuideLabel(guideType);
+  const guideClass = getGuideClass(guideType);
 
-  card.className = guideClass ? `visible ${guideClass}` : 'visible';
+  card.className = guideClass ? 'visible ' + guideClass : 'visible';
   badge.textContent = guideLabel;
-  summary.innerHTML = '<div class="heritage-loading"><div class="heritage-spinner"></div>Loading guide…</div>';
+  summary.innerHTML = '<div class="heritage-loading"><div class="heritage-spinner"></div>Asking Llama…</div>';
   factsEl.innerHTML = '';
   wikiLink.style.display = 'none';
 
+  // Resolve city from GPS
+  let city = '';
+  if (state.lat && state.lon) {
+    city = await getCurrentCity(state.lat, state.lon);
+  }
+
   try {
     if (guideType === 'food') {
-      await loadFoodGuide(place, city, summary, factsEl, wikiLink, card);
+      // ── Food: call /api/food (Groq web-search + summary) ──────────────
+      const res = await fetch('/api/food', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ placeName: place.name, city, tags }),
+      });
+      if (!res.ok) throw new Error('food api ' + res.status);
+      const data = await res.json();
+      if (!data.summary) { card.classList.remove('visible'); return; }
+
+      const parsed = parseGroqResponse(data.summary);
+      summary.textContent = parsed.summary || data.summary;
+      renderFacts(factsEl, parsed.facts, guideType);
+
+      const zq = encodeURIComponent(place.name + (city ? ' ' + city : ''));
+      wikiLink.href = 'https://www.zomato.com/search?q=' + zq;
+      wikiLink.textContent = '🍽 View on Zomato →';
+      wikiLink.style.display = 'inline-flex';
       return;
     }
+
+    // ── Heritage / hotel / shop / general: fetch Wikipedia then /api/heritage ──
     const wiki = await fetchWikipediaExtract(place.name, tags.wikipedia, tags, city);
-    if (!wiki || !wiki.extract || wiki.extract.length < 20) { card.classList.remove('visible'); return; }
-    let polishedSummary = wiki.extract.split('. ').slice(0, 2).join('. ') + '.';
+
+    // For non-heritage types without Wikipedia, still ask Llama with what we know
+    let extract = (wiki && wiki.extract && wiki.extract.length > 80)
+      ? wiki.extract
+      : 'No Wikipedia article found. Use your knowledge about this type of place and location.';
+
+    // Call /api/heritage — it rewrites/summarises the extract tourist-friendly
+    let polishedSummary = wiki ? wiki.extract.split('. ').slice(0, 2).join('. ') + '.' : null;
+    let facts = [];
+
     try {
       const aiRes = await fetch('/api/heritage', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ placeName: place.name, extract: wiki.extract, city }),
+        body: JSON.stringify({ placeName: place.name, extract, city }),
       });
-      if (aiRes.ok) { const aiData = await aiRes.json(); if (aiData.summary) polishedSummary = aiData.summary; }
-    } catch (e) { /* use raw extract */ }
-    summary.textContent = polishedSummary;
-    factsEl.innerHTML = '';
-    if (wiki.url) { wikiLink.href = wiki.url; wikiLink.textContent = '📖 Read full Wikipedia article →'; wikiLink.style.display = 'inline-flex'; }
-  } catch (e) { dbg('Guide error: ' + e.message); card.classList.remove('visible'); }
-}
+      if (aiRes.ok) {
+        const aiData = await aiRes.json();
+        if (aiData.summary) {
+          const parsed = parseGroqResponse(aiData.summary);
+          if (parsed.summary) polishedSummary = parsed.summary;
+          facts = parsed.facts;
+        }
+      }
+    } catch (e) { dbg('heritage api: ' + e.message); }
 
-async function loadFoodGuide(place, city, summary, factsEl, wikiLink, card) {
-  try {
-    const res = await fetch('/api/food', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ placeName: place.name, city, tags: place.tags }) });
-    if (!res.ok) throw new Error('food api ' + res.status);
-    const data = await res.json();
-    if (!data.summary) { card.classList.remove('visible'); return; }
-    summary.textContent = data.summary;
-    factsEl.innerHTML = '';
-    const zq = encodeURIComponent(place.name + (city ? ' ' + city : ''));
-    wikiLink.href = 'https://www.zomato.com/search?q=' + zq;
-    wikiLink.textContent = '🍽 View on Zomato →';
-    wikiLink.style.display = 'inline-flex';
-  } catch (e) { dbg('Food guide error: ' + e.message); card.classList.remove('visible'); }
+    if (!polishedSummary) { card.classList.remove('visible'); return; }
+
+    summary.textContent = polishedSummary;
+    renderFacts(factsEl, facts, guideType);
+
+    if (wiki && wiki.url) {
+      wikiLink.href = wiki.url;
+      wikiLink.textContent = '📖 Wikipedia →';
+      wikiLink.style.display = 'inline-flex';
+    } else if (guideType === 'hotel') {
+      const bq = encodeURIComponent(place.name + (city ? ' ' + city : ''));
+      wikiLink.href = 'https://www.booking.com/search.html?ss=' + bq;
+      wikiLink.textContent = '🏨 View on Booking.com →';
+      wikiLink.style.display = 'inline-flex';
+    }
+
+  } catch (e) {
+    dbg('Guide error: ' + e.message);
+    card.classList.remove('visible');
+  }
 }
 
 // ─────────────────────────────────────────────
