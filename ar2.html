@@ -597,16 +597,46 @@ const FILTER_DEFS = [
 // Active filter IDs — multi-select; 'all' is the default catch-all
 const state_filters = new Set(['all']);
 
-// Overpass mirrors — ordered by UAE reliability.
+// Overpass mirrors — ordered by UAE / Middle East reliability.
+// Each entry: [url, perRequestTimeoutMs]
 const OVERPASS_MIRRORS = [
-  'https://overpass.kumi.systems/api/interpreter',
-  'https://overpass.private.coffee/api/interpreter',
-  'https://corsproxy.io/?url=https://overpass-api.de/api/interpreter',
-  'https://overpass-api.de/api/interpreter',
-  'https://overpass.openstreetmap.ru/api/interpreter',
+  // Tier 1 — fastest for Gulf region
+  ['https://overpass.kumi.systems/api/interpreter',       18000],
+  ['https://overpass.private.coffee/api/interpreter',     18000],
+  // Tier 2 — global CDN / proxied
+  ['https://overpass-api.de/api/interpreter',             22000],
+  ['https://overpass.openstreetmap.ru/api/interpreter',   22000],
+  // Tier 3 — CORS proxy fallbacks (last resort)
+  ['https://corsproxy.io/?url=https%3A%2F%2Foverpass-api.de%2Fapi%2Finterpreter', 28000],
+  ['https://api.allorigins.win/raw?url=' + encodeURIComponent('https://overpass-api.de/api/interpreter'), 30000],
 ];
 
-const INSTANT_FAIL_MS = 2000;
+// Mirror health cache — penalise recently-failed mirrors
+const _mirrorHealth = {};  // url -> { failCount, lastFailTs }
+
+function _getMirrorPenalty(url) {
+  const h = _mirrorHealth[url];
+  if (!h) return 0;
+  const ageSec = (Date.now() - h.lastFailTs) / 1000;
+  if (ageSec > 120) { delete _mirrorHealth[url]; return 0; } // forget after 2 min
+  return h.failCount; // higher = more penalised
+}
+
+function _recordMirrorFail(url) {
+  if (!_mirrorHealth[url]) _mirrorHealth[url] = { failCount: 0, lastFailTs: 0 };
+  _mirrorHealth[url].failCount = Math.min(_mirrorHealth[url].failCount + 1, 5);
+  _mirrorHealth[url].lastFailTs = Date.now();
+}
+
+function _recordMirrorSuccess(url) {
+  delete _mirrorHealth[url];
+}
+
+// Auto-retry backoff state
+let _retryCount = 0;
+const RETRY_DELAYS_MS = [15000, 30000, 60000]; // 15s → 30s → 60s cap
+
+const INSTANT_FAIL_MS = 1500;
 
 // ─────────────────────────────────────────────
 //  Utilities
@@ -879,10 +909,12 @@ async function fetchPlaces(lat, lon){
   } catch(e){ dbg('Cache read error: ' + e.message); }
 
   dbg('fetch lat=' + lat.toFixed(5) + ' lon=' + lon.toFixed(5) + ' r=' + MAX_DIST + 'm');
+  statusPill.textContent = '⏳ Searching nearby places…';
   loadOverlay.classList.add('active');
 
   if(fetchRetryTimer !== null){ clearTimeout(fetchRetryTimer); fetchRetryTimer = null; }
 
+  // Overpass QL query — kept identical to original
   const query = '[out:json][timeout:30];(' +
     'node["amenity"~"restaurant|cafe|fast_food|bar|fuel|pharmacy|atm|bank|marketplace|place_of_worship"](around:' + MAX_DIST + ',' + lat + ',' + lon + ');' +
     'way["amenity"~"restaurant|cafe|fast_food|bar|fuel|pharmacy|atm|bank|marketplace|place_of_worship"](around:' + MAX_DIST + ',' + lat + ',' + lon + ');' +
@@ -893,62 +925,123 @@ async function fetchPlaces(lat, lon){
     ');out center tags;';
   const body = 'data=' + encodeURIComponent(query);
 
+  // ── Robust mirror fetch ──────────────────────────────────────────────────
+  // Strategy: sort mirrors by health penalty, then fire them in two waves:
+  //   Wave 1 — top 3 mirrors fired immediately (race).
+  //   Wave 2 — remaining mirrors fired after WAVE2_DELAY_MS if wave 1 hasn't resolved.
+  // This avoids hammering all mirrors at once while still having fast fallbacks.
+
+  const WAVE2_DELAY_MS = 3000;
+
+  // Sort mirrors: lowest penalty first; shuffle ties for load distribution
+  const sortedMirrors = [...OVERPASS_MIRRORS].sort((a, b) => {
+    const diff = _getMirrorPenalty(a[0]) - _getMirrorPenalty(b[0]);
+    return diff !== 0 ? diff : (Math.random() - 0.5);
+  });
+
+  const mirrorFetch = ([url, timeoutMs], ctrl) => {
+    const host = url.replace(/^https?:\/\//, '').split('/')[0].split('?')[0];
+    const t0 = Date.now();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+      signal: ctrl.signal,
+    }).then(async res => {
+      clearTimeout(timer);
+      const elapsed = Date.now() - t0;
+      if (!res.ok) throw new Error('HTTP ' + res.status + ' from ' + host);
+      const text = await res.text();
+      if (text.length < 10) throw new Error('Empty body from ' + host);
+      let parsed;
+      try { parsed = JSON.parse(text); } catch(_) { throw new Error('Bad JSON from ' + host); }
+      if (!parsed || !Array.isArray(parsed.elements)) throw new Error('No elements array from ' + host);
+      _recordMirrorSuccess(url);
+      dbg('✓ ' + host + ' ' + elapsed + 'ms (' + parsed.elements.length + ' el)');
+      return parsed;
+    }).catch(e => {
+      clearTimeout(timer);
+      const elapsed = Date.now() - t0;
+      const tag = e.name === 'AbortError' ? 'TIMEOUT' : elapsed < INSTANT_FAIL_MS ? 'BLOCKED' : 'ERR';
+      _recordMirrorFail(url);
+      dbg('✗ ' + host + ' [' + tag + ' ' + elapsed + 'ms]: ' + (e.message || e));
+      throw e;
+    });
+  };
+
+  // Build controllers lazily
+  const ctrls = sortedMirrors.map(() => new AbortController());
+  const abortAll = () => ctrls.forEach(c => { try { c.abort(); } catch(_){} });
+
   let data = null;
   try {
-    statusPill.textContent = '⏳ Searching nearby places…';
-    const controllers = OVERPASS_MIRRORS.map(() => new AbortController());
+    // Wave 1: fire top 3 immediately
+    const wave1 = sortedMirrors.slice(0, 3).map((m, i) => mirrorFetch(m, ctrls[i]));
+    const wave2 = sortedMirrors.slice(3);
 
-    const mirrorFetch = (mirror, ctrl, idx) => {
-      const host = mirror.replace('https://','').split('/')[0];
-      const t0 = Date.now();
-      const timer = setTimeout(() => ctrl.abort(), 25000);
-      return fetch(mirror, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body,
-        signal: ctrl.signal,
-      }).then(async res => {
-        clearTimeout(timer);
-        const elapsed = Date.now() - t0;
-        if(!res.ok) throw new Error('HTTP ' + res.status + ' from ' + host);
-        const text = await res.text();
-        if(text.length < 10) throw new Error('Empty body from ' + host);
-        const parsed = JSON.parse(text);
-        if(!parsed || !Array.isArray(parsed.elements)) throw new Error('No elements from ' + host);
-        dbg('✓ ' + host + ' responded in ' + elapsed + 'ms (' + parsed.elements.length + ' elements)');
-        return parsed;
-      }).catch(e => {
-        clearTimeout(timer);
-        const elapsed = Date.now() - t0;
-        const tag = elapsed < INSTANT_FAIL_MS ? 'BLOCKED' : 'SLOW/ERR';
-        dbg('✗ ' + host + ' [' + tag + ' ' + elapsed + 'ms]: ' + e.message);
-        throw e;
-      });
-    };
+    // Wrap each promise so Promise.any sees rejections correctly
+    const makeRace = (promises) => Promise.any(promises.map(p =>
+      p.then(v => v, e => Promise.reject(e))
+    ));
 
-    try {
-      data = await Promise.any(
-        OVERPASS_MIRRORS.map((m, i) => mirrorFetch(m, controllers[i], i))
-      );
-      controllers.forEach(c => { try{ c.abort(); }catch(_){} });
-    } catch(aggErr){
-      controllers.forEach(c => { try{ c.abort(); }catch(_){} });
-    }
+    // Race wave 1; if it doesn't resolve in WAVE2_DELAY_MS, also fire wave 2
+    let wave2Fired = false;
+    const wave2Timer = setTimeout(() => {
+      if (data !== null) return; // already resolved
+      wave2Fired = true;
+      dbg('Wave 2 triggered (' + wave2.length + ' extra mirrors)');
+      // Merge wave2 into the race — resolve the outer promise if any wave2 mirror wins
+    }, WAVE2_DELAY_MS);
+
+    // Build the combined race promise
+    data = await new Promise((resolve, reject) => {
+      let settled = false;
+      const settle = (val) => { if (!settled) { settled = true; clearTimeout(wave2Timer); resolve(val); } };
+      const errors = [];
+      const totalCount = sortedMirrors.length;
+      let rejectedCount = 0;
+
+      const attachPromise = (p) => {
+        p.then(settle).catch(e => {
+          errors.push(e);
+          rejectedCount++;
+          if (rejectedCount >= totalCount) reject(new AggregateError(errors, 'All mirrors failed'));
+        });
+      };
+
+      wave1.forEach(attachPromise);
+
+      // Fire wave 2 after delay, adding them to the race
+      setTimeout(() => {
+        if (settled) return;
+        wave2.forEach((m, i) => attachPromise(mirrorFetch(m, ctrls[3 + i])));
+      }, WAVE2_DELAY_MS);
+    });
+
+    abortAll();
+  } catch(aggErr) {
+    abortAll();
+  }
 
     if(!data || !Array.isArray(data.elements)){
+      const delay = RETRY_DELAYS_MS[Math.min(_retryCount, RETRY_DELAYS_MS.length - 1)];
+      _retryCount++;
+      const delaySec = Math.round(delay / 1000);
       statusPill.textContent = '⚠️ No server responded';
-      showErrorToast('All OSM servers unreachable. Retrying in 20s — or tap Refresh now.');
-      dbg('All mirrors failed — auto-retry in 20s');
+      showErrorToast('All OSM servers unreachable. Auto-retry in ' + delaySec + 's — or tap Refresh now.');
+      dbg('All mirrors failed (attempt ' + _retryCount + ') — auto-retry in ' + delaySec + 's');
       fetchFailed = true;
       fetchRetryTimer = setTimeout(() => {
         fetchRetryTimer = null;
         if(state.lat !== null && !state.demoMode){
-          dbg('Auto-retry after all-mirror failure');
+          dbg('Auto-retry #' + _retryCount);
           fetchPlaces(state.lat, state.lon);
         }
-      }, 20000);
+      }, delay);
       return;
     }
+    _retryCount = 0; // reset on success
 
     dbg('Raw elements: ' + data.elements.length);
     const mapped = data.elements.map(function(el){
@@ -2043,7 +2136,23 @@ try {
 
 let currentRadius = MAX_DIST;
 refreshBtn.addEventListener('click', async () => {
-  // ... (same refresh logic as original)
+  if(state.demoMode) return;
+  if(fetchInFlight){ dbg('Refresh: fetch already in flight'); return; }
+  if(fetchRetryTimer !== null){ clearTimeout(fetchRetryTimer); fetchRetryTimer = null; }
+  // Clear session cache so we always get fresh data on manual refresh
+  try {
+    Object.keys(sessionStorage)
+      .filter(k => k.startsWith('arplaces_'))
+      .forEach(k => sessionStorage.removeItem(k));
+  } catch(_){}
+  _retryCount = 0; // reset backoff
+  if(state.lat !== null){
+    dbg('Manual refresh triggered');
+    fetchPlaces(state.lat, state.lon);
+  } else {
+    dbg('Refresh: GPS not available yet');
+    statusPill.textContent = '⚠️ Waiting for GPS…';
+  }
 });
 
 // ─────────────────────────────────────────────
