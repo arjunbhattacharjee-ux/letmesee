@@ -1,6 +1,6 @@
 // /api/food.js — Vercel Edge function
-// Searches the web for restaurant/cafe info using Groq's web_search tool,
-// then returns a short tourist-friendly summary.
+// Searches the web for restaurant/cafe info using Groq,
+// returns a tourist-friendly summary + 2 fun facts.
 
 export const config = { runtime: 'edge' };
 
@@ -40,14 +40,23 @@ export default async function handler(req) {
 
   const locationContext = city ? `${placeName}, ${city}` : placeName;
   const cuisineHint = tags.cuisine ? ` (${tags.cuisine.replace(/_/g, ' ')})` : '';
-  const typeHint = tags.amenity === 'cafe' ? 'café' : tags.amenity === 'fast_food' ? 'fast food restaurant' : 'restaurant';
+  const typeHint =
+    tags.amenity === 'cafe' ? 'café' :
+    tags.amenity === 'fast_food' ? 'fast food restaurant' :
+    tags.amenity === 'bar' ? 'bar' : 'restaurant';
 
-  // First call: ask Groq to web-search for the place
-  const searchPrompt = `Search the web for "${locationContext}"${cuisineHint} — a ${typeHint}. Find its cuisine type, vibe, must-try dishes, price range, and any notable reviews. Then write a 2–3 sentence tourist-friendly summary of what makes it worth visiting. Be specific and factual based only on what you find. If you cannot find reliable information about this specific place, say so briefly.`;
+  const prompt = `You are a local food expert. Write a 2-sentence tourist-friendly description of "${locationContext}"${cuisineHint}, a ${typeHint}. Cover the vibe, must-try dishes, price range, or what makes it special. Be specific and engaging. If you don't have exact details for this place, give a realistic description based on the cuisine type and location.
 
-  let groqRes;
+Output format — plain text only, no markdown, no asterisks:
+[Your 2-sentence description here]
+FACT: [one fun fact or insider tip about this place or cuisine, under 20 words]
+FACT: [a second fun fact or practical tip, under 20 words]`;
+
+  let summary = null;
+
+  // Primary call
   try {
-    groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -56,62 +65,25 @@ export default async function handler(req) {
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
         max_tokens: 300,
-        temperature: 0.5,
-        tools: [
-          {
-            type: 'function',
-            function: {
-              name: 'web_search',
-              description: 'Search the web for current information',
-              parameters: {
-                type: 'object',
-                properties: {
-                  query: { type: 'string', description: 'The search query' },
-                },
-                required: ['query'],
-              },
-            },
-          },
-        ],
-        tool_choice: 'auto',
+        temperature: 0.6,
         messages: [
           {
             role: 'system',
-            content: 'You are a helpful local food guide. Use web search to find accurate, up-to-date information about restaurants and cafés. Always search before answering.',
+            content: 'You are a concise local food guide. Always follow the exact output format requested. No markdown, no bullet points, no asterisks.',
           },
-          { role: 'user', content: searchPrompt },
+          { role: 'user', content: prompt },
         ],
       }),
     });
-  } catch (e) {
-    return new Response(JSON.stringify({ error: 'Groq request failed: ' + e.message }), {
-      status: 502,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
 
-  if (!groqRes.ok) {
-    const errText = await groqRes.text();
-    return new Response(JSON.stringify({ error: 'Groq error: ' + errText }), {
-      status: 502,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  const data = await groqRes.json();
-
-  // Extract the final text response (after any tool calls)
-  let summary = null;
-  for (const choice of data.choices || []) {
-    const msg = choice.message;
-    if (msg?.content && msg.content.trim().length > 20) {
-      summary = msg.content.trim();
-      break;
+    if (groqRes.ok) {
+      const data = await groqRes.json();
+      const content = data.choices?.[0]?.message?.content?.trim();
+      if (content && content.length > 20) summary = content;
     }
-  }
+  } catch (e) { /* fall through to fallback */ }
 
-  // Fallback: if model only returned a tool_call with no final text,
-  // do a simpler follow-up without tools
+  // Fallback: simpler prompt without format instructions
   if (!summary) {
     try {
       const fallbackRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -127,7 +99,7 @@ export default async function handler(req) {
           messages: [
             {
               role: 'user',
-              content: `Write a 2–3 sentence tourist-friendly description of "${locationContext}", a ${typeHint}${cuisineHint}. Focus on cuisine, vibe, and what makes it worth visiting. Be concise and engaging.`,
+              content: `Write a 2-sentence tourist-friendly description of "${locationContext}", a ${typeHint}${cuisineHint}. Focus on cuisine, vibe, and what makes it worth visiting.`,
             },
           ],
         }),

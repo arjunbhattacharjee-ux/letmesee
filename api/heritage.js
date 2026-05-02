@@ -1,6 +1,5 @@
 // /api/heritage.js — Vercel Edge function
-// Summarises a Wikipedia extract in a tourist‑friendly tone.
-// No new facts are invented — strict rewriting only.
+// Rewrites a Wikipedia extract tourist-friendly, plus 2 fun facts.
 
 export const config = { runtime: 'edge' };
 
@@ -40,12 +39,15 @@ export default async function handler(req) {
 
   const locationContext = city ? `"${placeName}" in ${city}` : `"${placeName}"`;
 
-  const prompt = `You are a helpful local guide. Rewrite the following description of ${locationContext} for a tourist standing right there. Use 2–3 engaging sentences. Do NOT add any facts, dates, or names that are not in the original text. Stay strictly factual.
+  const prompt = `You are a helpful local guide. Rewrite the following description of ${locationContext} for a tourist standing right there. Use 2–3 engaging sentences. Stay strictly factual — do NOT add any facts, dates, or names not present in the original text.
 
 Original text:
 ${extract.slice(0, 1500)}
 
-Rewritten (just the text, no extra commentary):`;
+Output format — plain text only, no markdown, no asterisks:
+[Your 2–3 sentence rewrite here]
+FACT: [one short insider tip or fun fact from the text, under 20 words]
+FACT: [a second short fun fact or highlight from the text, under 20 words]`;
 
   const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
@@ -55,9 +57,15 @@ Rewritten (just the text, no extra commentary):`;
     },
     body: JSON.stringify({
       model: 'llama-3.3-70b-versatile',
-      max_tokens: 200,
+      max_tokens: 300,
       temperature: 0.6,
-      messages: [{ role: 'user', content: prompt }],
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a concise local guide. Always follow the exact output format requested. No markdown, no bullet points, no asterisks.',
+        },
+        { role: 'user', content: prompt },
+      ],
     }),
   });
 
