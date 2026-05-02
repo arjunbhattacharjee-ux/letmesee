@@ -900,6 +900,7 @@ async function fetchPlaces(lat, lon){
         dbg('Cache hit — ' + state.places.length + ' places, age=' + Math.round(ageSec) + 's moved=' + Math.round(movedM) + 'm');
         fetchFailed = false;
         fetchInFlight = false;
+        clearTimeout(_safetyTimer);
         showCalibToast();
         return;
       }
@@ -976,72 +977,64 @@ async function fetchPlaces(lat, lon){
 
   let data = null;
   try {
-    // Wave 1: fire top 3 immediately
-    const wave1 = sortedMirrors.slice(0, 3).map((m, i) => mirrorFetch(m, ctrls[i]));
-    const wave2 = sortedMirrors.slice(3);
-
-    // Wrap each promise so Promise.any sees rejections correctly
-    const makeRace = (promises) => Promise.any(promises.map(p =>
-      p.then(v => v, e => Promise.reject(e))
-    ));
-
-    // Race wave 1; if it doesn't resolve in WAVE2_DELAY_MS, also fire wave 2
-    let wave2Fired = false;
-    const wave2Timer = setTimeout(() => {
-      if (data !== null) return; // already resolved
-      wave2Fired = true;
-      dbg('Wave 2 triggered (' + wave2.length + ' extra mirrors)');
-      // Merge wave2 into the race — resolve the outer promise if any wave2 mirror wins
-    }, WAVE2_DELAY_MS);
-
-    // Build the combined race promise
+    // Wave 1: fire top 3 mirrors immediately; Wave 2: remaining mirrors after WAVE2_DELAY_MS.
+    // Uses a manual promise to avoid AggregateError (not available on older iOS Safari).
     data = await new Promise((resolve, reject) => {
       let settled = false;
-      const settle = (val) => { if (!settled) { settled = true; clearTimeout(wave2Timer); resolve(val); } };
-      const errors = [];
-      const totalCount = sortedMirrors.length;
       let rejectedCount = 0;
+      const totalCount = sortedMirrors.length;
 
-      const attachPromise = (p) => {
-        p.then(settle).catch(e => {
-          errors.push(e);
-          rejectedCount++;
-          if (rejectedCount >= totalCount) reject(new AggregateError(errors, 'All mirrors failed'));
-        });
+      const settle = (val) => {
+        if (!settled) { settled = true; abortAll(); resolve(val); }
+      };
+      const onReject = () => {
+        rejectedCount++;
+        if (rejectedCount >= totalCount) {
+          abortAll();
+          reject(new Error('All mirrors failed'));
+        }
       };
 
-      wave1.forEach(attachPromise);
+      // Wave 1: top 3
+      sortedMirrors.slice(0, 3).forEach((m, i) => {
+        mirrorFetch(m, ctrls[i]).then(settle, onReject);
+      });
 
-      // Fire wave 2 after delay, adding them to the race
+      // Wave 2: rest, fired after delay if not yet resolved
       setTimeout(() => {
         if (settled) return;
-        wave2.forEach((m, i) => attachPromise(mirrorFetch(m, ctrls[3 + i])));
+        dbg('Wave 2 fired (' + sortedMirrors.slice(3).length + ' more mirrors)');
+        sortedMirrors.slice(3).forEach((m, i) => {
+          mirrorFetch(m, ctrls[3 + i]).then(settle, onReject);
+        });
       }, WAVE2_DELAY_MS);
     });
 
+  } catch(err) {
     abortAll();
-  } catch(aggErr) {
-    abortAll();
+    dbg('All mirrors rejected: ' + err.message);
   }
 
-    if(!data || !Array.isArray(data.elements)){
+  try {
+    if (!data || !Array.isArray(data.elements)) {
       const delay = RETRY_DELAYS_MS[Math.min(_retryCount, RETRY_DELAYS_MS.length - 1)];
       _retryCount++;
       const delaySec = Math.round(delay / 1000);
       statusPill.textContent = '⚠️ No server responded';
       showErrorToast('All OSM servers unreachable. Auto-retry in ' + delaySec + 's — or tap Refresh now.');
-      dbg('All mirrors failed (attempt ' + _retryCount + ') — auto-retry in ' + delaySec + 's');
+      dbg('All mirrors failed (attempt ' + _retryCount + ') — retry in ' + delaySec + 's');
       fetchFailed = true;
       fetchRetryTimer = setTimeout(() => {
         fetchRetryTimer = null;
-        if(state.lat !== null && !state.demoMode){
+        if (state.lat !== null && !state.demoMode) {
           dbg('Auto-retry #' + _retryCount);
           fetchPlaces(state.lat, state.lon);
         }
       }, delay);
       return;
     }
-    _retryCount = 0; // reset on success
+
+    _retryCount = 0;
 
     dbg('Raw elements: ' + data.elements.length);
     const mapped = data.elements.map(function(el){
@@ -1067,22 +1060,22 @@ async function fetchPlaces(lat, lon){
     fetchFailed = false;
     currentRadius = MAX_DIST;
 
-    if(sorted.length > 0){
+    if (sorted.length > 0) {
       try {
         sessionStorage.setItem(cacheKey, JSON.stringify(sorted));
         sessionStorage.setItem(cacheMetaKey, JSON.stringify({ ts: Date.now(), lat, lon }));
       } catch(e){ dbg('Cache write error: ' + e.message); }
     }
 
-    if(sorted.length === 0){
+    if (sorted.length === 0) {
       statusPill.textContent = '0 places — tap Refresh to widen';
-      showErrorToast('0 places within ' + (MAX_DIST/1000).toFixed(1) + ' km. See debug panel. Tap Refresh to widen search.');
+      showErrorToast('0 places within ' + (MAX_DIST/1000).toFixed(1) + ' km. Tap Refresh to widen search.');
     } else {
       statusPill.textContent = sorted.length + ' places nearby';
       showCalibToast();
     }
 
-    if(!state.demoMode) fetchBazingaPlaces(lat, lon).catch(e => dbg('Bazinga: ' + e.message));
+    if (!state.demoMode) fetchBazingaPlaces(lat, lon).catch(e => dbg('Bazinga: ' + e.message));
 
   } finally {
     clearTimeout(_safetyTimer);
