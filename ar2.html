@@ -1002,7 +1002,7 @@ function handleFilterTap(fid){
   filterBar.querySelectorAll('.filter-chip').forEach(chip => {
     chip.classList.toggle('active', state_filters.has(chip.dataset.fid));
   });
-  const visible = state.places.filter(placePassesFilter).length + (state.bazingaPlaces || []).length;
+  const visible = state.places.filter(placePassesFilter).length;
   placeCount.textContent = visible;
 }
 
@@ -1095,7 +1095,7 @@ async function fetchPlaces(lat, lon){
       const parsed = JSON.parse(cached);
       if(Array.isArray(parsed) && parsed.length > 0){
         state.places = parsed.map(p => ({ ...p, dist: haversine(lat, lon, p.lat, p.lon) }));
-        placeCount.textContent = state.places.filter(placePassesFilter).length + (state.bazingaPlaces || []).length;
+        placeCount.textContent = state.places.filter(placePassesFilter).length;
         statusPill.textContent = state.places.length + ' places nearby (cached)';
         dbg('Cache hit — ' + state.places.length + ' places, age=' + Math.round(ageSec) + 's moved=' + Math.round(movedM) + 'm');
         fetchFailed = false;
@@ -1201,7 +1201,7 @@ async function fetchPlaces(lat, lon){
 
     dbg('Raw=' + data.elements.length + ' named=' + afterNull.length + ' inRadius=' + afterRadius.length + ' final=' + sorted.length);
     state.places = sorted;
-    placeCount.textContent = sorted.filter(placePassesFilter).length + (state.bazingaPlaces || []).length;
+    placeCount.textContent = sorted.filter(placePassesFilter).length;
     fetchFailed = false;
     currentRadius = MAX_DIST;
 
@@ -2188,8 +2188,19 @@ function openPanel(place){
     document.getElementById('panel-category').textContent = '⚡ BAZINGA · ' + (place.category||'News').toUpperCase();
     document.getElementById('panel-name').textContent = place.headline || place.name;
     document.getElementById('panel-dist').textContent = formatDist(place.dist) + ' away';
-    document.getElementById('panel-tags').innerHTML = '';
-    const cs = document.createElement('span'); cs.className='tag'; cs.textContent=place.category||'News'; document.getElementById('panel-tags').appendChild(cs);
+
+    // Tags row — category chip + date chip
+    const tagRow = document.getElementById('panel-tags');
+    tagRow.innerHTML = '';
+    const cs = document.createElement('span'); cs.className='tag'; cs.textContent=place.category||'News'; tagRow.appendChild(cs);
+    if(place.date_label){
+      const ds = document.createElement('span');
+      ds.className = 'tag';
+      ds.style.cssText = 'color:rgba(255,214,10,0.9);border-color:rgba(255,214,10,0.3);';
+      ds.textContent = '🗓 ' + place.date_label;
+      tagRow.appendChild(ds);
+    }
+
     const rows = document.getElementById('panel-rows'); rows.innerHTML='';
     const se = document.createElement('div'); se.style.cssText='font-size:14px;line-height:1.65;color:rgba(255,255,255,0.85);padding:10px 0;'; se.textContent=place.summary||''; rows.appendChild(se);
     if(place.url){ const a=document.createElement('a'); a.href=place.url; a.target='_blank'; a.rel='noopener noreferrer'; a.style.cssText='display:inline-flex;align-items:center;gap:5px;margin-top:6px;font-size:12px;color:#FFD60A;text-decoration:none;'; a.textContent='🔗 Read full story →'; rows.appendChild(a); }
@@ -2337,15 +2348,14 @@ async function fetchBazingaPlaces(lat, lon) {
       headline: s.headline || s.name,
       summary: s.summary || '',
       category: s.category || 'News',
+      date: s.date || null,
+      date_label: s.date_label || null,
       url: s.url || null,
       lat: s.lat, lon: s.lon,
       dist: haversine(lat, lon, s.lat, s.lon),
       tags: {},
     }));
     dbg('Bazinga loaded: ' + state.bazingaPlaces.length + ' spots');
-    // Update count badge to include bazinga spots
-    const totalVisible = state.places.filter(placePassesFilter).length + state.bazingaPlaces.length;
-    placeCount.textContent = totalVisible;
   } catch(e) { dbg('fetchBazingaPlaces: ' + e.message); }
 }
 
