@@ -403,175 +403,165 @@
   .close-btn:active { background: var(--glass-mid); }
 
   #panel-category {
-    font-size: 10.5px; font-weight: 600;
-    text-transform: uppercase; letter-spacing: 1.8px;
+    font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 2px;
     color: var(--accent);
-    margin-bottom: 5px;
+    margin-bottom: 6px;
+    opacity: 0.8;
   }
 
   #panel-name {
     font-family: var(--font-display);
-    font-size: 26px; font-weight: 700;
-    letter-spacing: -0.5px; line-height: 1.15;
-    margin-bottom: 14px;
-    padding-right: 40px;
+    font-size: 28px; font-weight: 700;
+    letter-spacing: -0.8px; line-height: 1.1;
+    margin-bottom: 16px;
+    padding-right: 44px;
   }
 
   .panel-meta-row {
     display: flex; align-items: center; gap: 8px;
-    margin-bottom: 16px; flex-wrap: wrap;
+    margin-bottom: 20px; flex-wrap: wrap;
   }
 
   .dist-badge {
     display: inline-flex; align-items: center; gap: 5px;
-    background: var(--accent);
-    font-size: 12.5px; font-weight: 600;
+    background: rgba(255,255,255,0.08);
+    border: 0.5px solid rgba(255,255,255,0.14);
+    color: var(--text-mid);
+    font-size: 12px; font-weight: 600;
     padding: 5px 13px; border-radius: 20px;
-    letter-spacing: -0.1px;
+    letter-spacing: 0.1px;
   }
 
   .tag {
-    font-size: 11.5px; font-weight: 500;
-    padding: 4px 12px; border-radius: 20px;
-    background: var(--glass-light);
-    border: 0.5px solid var(--border);
-    color: var(--text-mid);
+    font-size: 11px; font-weight: 500;
+    padding: 4px 11px; border-radius: 20px;
+    background: transparent;
+    border: 0.5px solid rgba(255,255,255,0.12);
+    color: var(--text-dim);
+    text-transform: capitalize;
   }
 
-  /* Action buttons row */
+  /* Action buttons */
   .panel-actions {
     display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 10px;
-    margin-bottom: 18px;
+    grid-template-columns: 2fr 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 22px;
   }
   .action-btn {
     display: flex; flex-direction: column;
     align-items: center; justify-content: center;
-    gap: 6px;
-    background: var(--glass-light);
-    border: 0.5px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 13px 8px;
+    gap: 5px;
+    background: rgba(255,255,255,0.06);
+    border: 0.5px solid rgba(255,255,255,0.10);
+    border-radius: 14px;
+    padding: 14px 8px;
     cursor: pointer;
     font-family: var(--font);
-    transition: background 0.15s, border-color 0.15s;
+    transition: background 0.15s;
     text-decoration: none;
     -webkit-tap-highlight-color: transparent;
   }
-  .action-btn:active { background: var(--glass-mid); }
-  .action-btn-icon { font-size: 20px; line-height: 1; }
-  .action-btn-label { font-size: 11px; font-weight: 500; color: var(--text-mid); }
+  .action-btn:active { background: rgba(255,255,255,0.11); }
+  .action-btn-icon { font-size: 19px; line-height: 1; }
+  .action-btn-label { font-size: 11px; font-weight: 500; color: var(--text-dim); }
   .action-btn.primary-action {
-    background: linear-gradient(135deg, var(--blue), #0055cc);
+    background: var(--blue);
     border-color: transparent;
-    box-shadow: 0 4px 16px rgba(10,132,255,0.3);
+    box-shadow: 0 4px 20px rgba(10,132,255,0.28);
   }
-  .action-btn.primary-action .action-btn-label { color: #fff; }
+  .action-btn.primary-action .action-btn-label { color: rgba(255,255,255,0.85); }
+  .action-btn.primary-action .action-btn-icon { font-size: 20px; }
 
   /* Divider */
   .panel-divider {
     height: 0.5px;
-    background: var(--border);
-    margin: 6px 0 16px;
+    background: rgba(255,255,255,0.08);
+    margin: 2px 0 18px;
   }
 
   /* Info rows */
   .panel-row {
     display: flex; align-items: center; gap: 12px;
-    padding: 11px 0;
-    border-bottom: 0.5px solid var(--border);
-    font-size: 14px; color: var(--text-dim);
+    padding: 12px 0;
+    border-bottom: 0.5px solid rgba(255,255,255,0.07);
   }
   .panel-row:last-child { border-bottom: none; }
   .panel-icon {
-    font-size: 17px; width: 22px;
+    font-size: 16px; width: 20px;
     text-align: center; flex-shrink: 0;
+    opacity: 0.6;
   }
-  .panel-val { color: var(--text); font-weight: 400; }
-
+  .panel-val {
+    color: var(--text-mid); font-weight: 400;
+    font-size: 13.5px; line-height: 1.4;
+  }
   .stars { color: var(--accent2); letter-spacing: 2px; font-size: 13px; }
 
-  /* ── AI Guide card ── */
+  /* ── Panel rows ── */
+  .panel-link {
+    color: var(--blue);
+    text-decoration: none;
+    font-size: 13.5px;
+  }
+
+  /* ── AI summary section (no header, seamless) ── */
   #heritage-card {
-    margin-top: 18px;
-    background: linear-gradient(135deg, rgba(191,90,242,0.10), rgba(10,132,255,0.08));
-    border: 0.5px solid rgba(191,90,242,0.25);
-    border-radius: 16px;
-    padding: 16px 18px;
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 0.5px solid var(--border);
     display: none;
   }
   #heritage-card.visible { display: block; }
-  #heritage-card.food-guide {
-    background: linear-gradient(135deg, rgba(255,59,48,0.10), rgba(255,159,10,0.08));
-    border-color: rgba(255,159,10,0.25);
-  }
-  #heritage-card.hotel-guide {
-    background: linear-gradient(135deg, rgba(10,132,255,0.10), rgba(48,209,88,0.08));
-    border-color: rgba(10,132,255,0.25);
-  }
-  #heritage-card.shop-guide {
-    background: linear-gradient(135deg, rgba(255,55,95,0.10), rgba(255,214,10,0.08));
-    border-color: rgba(255,55,95,0.25);
-  }
 
-  .heritage-header {
-    display: flex; align-items: center; gap: 8px;
-    margin-bottom: 12px;
-  }
-  .heritage-badge {
-    font-size: 10px; font-weight: 700;
-    letter-spacing: 1.2px; text-transform: uppercase;
-    color: var(--purple);
-    background: rgba(191,90,242,0.12);
-    border: 0.5px solid rgba(191,90,242,0.3);
-    border-radius: 20px;
-    padding: 3px 10px;
-  }
-  .heritage-powered {
-    font-size: 10px; color: rgba(255,255,255,0.25);
-    margin-left: auto; letter-spacing: 0.2px;
-  }
+  /* hide the old header entirely */
+  .heritage-header { display: none; }
+  .heritage-powered { display: none; }
+  .heritage-badge   { display: none; }
 
   #heritage-summary {
-    font-size: 13.5px; line-height: 1.7;
-    color: rgba(255,255,255,0.82);
-    margin-bottom: 13px;
+    font-size: 14px; line-height: 1.72;
+    color: rgba(255,255,255,0.78);
+    margin-bottom: 14px;
     font-weight: 300;
+    font-style: italic;
   }
 
-  .heritage-facts { display: flex; flex-direction: column; gap: 8px; }
+  .heritage-facts { display: flex; flex-direction: column; gap: 7px; }
   .heritage-fact {
     display: flex; gap: 10px; align-items: flex-start;
-    background: rgba(255,255,255,0.035);
-    border: 0.5px solid rgba(255,255,255,0.07);
-    border-radius: 10px;
-    padding: 10px 13px;
+    padding: 9px 0;
+    border-top: 0.5px solid rgba(255,255,255,0.06);
   }
-  .heritage-fact-icon { font-size: 15px; flex-shrink: 0; margin-top: 1px; }
-  .heritage-fact-text { font-size: 12.5px; color: rgba(255,255,255,0.72); line-height: 1.55; font-weight: 300; }
+  .heritage-fact-icon { font-size: 14px; flex-shrink: 0; opacity: 0.7; margin-top: 2px; }
+  .heritage-fact-text {
+    font-size: 12.5px; color: rgba(255,255,255,0.6);
+    line-height: 1.55; font-weight: 300;
+  }
 
   .heritage-loading {
     display: flex; align-items: center; gap: 10px;
-    font-size: 12.5px; color: rgba(255,255,255,0.38);
+    font-size: 12px; color: rgba(255,255,255,0.3);
     padding: 2px 0;
   }
   .heritage-spinner {
-    width: 15px; height: 15px; flex-shrink: 0;
-    border: 1.5px solid rgba(191,90,242,0.2);
-    border-top-color: var(--purple);
+    width: 14px; height: 14px; flex-shrink: 0;
+    border: 1.5px solid rgba(255,255,255,0.1);
+    border-top-color: rgba(255,255,255,0.5);
     border-radius: 50%;
-    animation: spin 0.8s linear infinite;
+    animation: spin 0.9s linear infinite;
   }
 
   #heritage-wiki-link {
     display: none; align-items: center; gap: 5px;
-    margin-top: 13px;
-    font-size: 12px; color: rgba(191,90,242,0.75);
+    margin-top: 14px;
+    font-size: 12px; color: var(--blue);
     text-decoration: none; font-weight: 500;
-    transition: color 0.15s;
+    opacity: 0.8;
+    transition: opacity 0.15s;
   }
-  #heritage-wiki-link:hover { color: var(--purple); }
+  #heritage-wiki-link:hover { opacity: 1; }
 
   /* ── Calibration toast ── */
   #calib-toast {
@@ -748,17 +738,12 @@
   <div class="panel-divider"></div>
   <div id="panel-rows"></div>
 
-  <!-- AI Guide -->
+  <!-- AI summary — no header, seamless -->
   <div id="heritage-card">
-    <div class="heritage-header">
-      <span class="heritage-badge" id="guide-badge">✦ Place Guide</span>
-      <span class="heritage-powered">Llama 3 · Groq</span>
-    </div>
+    <div class="heritage-header"><span class="heritage-badge" id="guide-badge"></span><span class="heritage-powered"></span></div>
     <div id="heritage-summary"></div>
     <div class="heritage-facts" id="heritage-facts"></div>
-    <a id="heritage-wiki-link" href="#" target="_blank" rel="noopener noreferrer" style="display:none">
-      📖 Read more →
-    </a>
+    <a id="heritage-wiki-link" href="#" target="_blank" rel="noopener noreferrer" style="display:none"></a>
   </div>
 </div>
 
@@ -2240,72 +2225,59 @@ function openPanel(place){
   const rows = document.getElementById('panel-rows');
   rows.innerHTML = '';
 
-  const liveDist = (state.lat && state.lon)
-    ? haversine(state.lat, state.lon, place.lat, place.lon)
-    : place.dist;
-
-  function makeRow(icon, label, valNode){
+  function makeRow(icon, val, isLink){
+    if(!val) return;
     const row = document.createElement('div');
     row.className = 'panel-row';
     const ic = document.createElement('span');
     ic.className = 'panel-icon';
     ic.textContent = icon;
-    const lb = document.createElement('span');
-    lb.style.cssText = 'color:var(--text-dim);flex:1';
-    lb.textContent = label;
     const vl = document.createElement('span');
     vl.className = 'panel-val';
-    if(typeof valNode === 'string'){
-      vl.textContent = valNode;
-    } else if(valNode instanceof Node){
-      vl.appendChild(valNode);
+    if(isLink && val instanceof Node){
+      vl.appendChild(val);
+    } else {
+      vl.textContent = val;
     }
-    row.appendChild(ic); row.appendChild(lb); row.appendChild(vl);
+    row.appendChild(ic); row.appendChild(vl);
     rows.appendChild(row);
   }
 
-  function addText(icon, label, val){
-    if(!val) return;
-    makeRow(icon, label, val);
-  }
-
-  function addWebsite(rawUrl){
-    if(!rawUrl) return;
-    let safeUrl;
+  // Website — clean display
+  if(tags.website){
     try {
-      const u = new URL(rawUrl);
-      if(u.protocol !== 'https:' && u.protocol !== 'http:') return;
-      safeUrl = u.href;
-    } catch(e){ return; }
-    const a = document.createElement('a');
-    a.href = safeUrl;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    a.style.color = '#64b5f6';
-    const display = safeUrl.replace(/https?:\/\/(www\.)?/, '').split('/')[0];
-    a.textContent = display.length > 28 ? display.slice(0, 28) + '…' : display;
-    makeRow('🌐', 'Website', a);
+      const u = new URL(tags.website);
+      if(u.protocol === 'https:' || u.protocol === 'http:'){
+        const a = document.createElement('a');
+        a.href = u.href; a.target = '_blank'; a.rel = 'noopener noreferrer';
+        a.className = 'panel-link';
+        const display = u.hostname.replace(/^www\./, '');
+        a.textContent = display.length > 32 ? display.slice(0,32)+'…' : display;
+        makeRow('🌐', a, true);
+      }
+    } catch(_){}
   }
 
-  function osmLink(){
-    const type = place.osmType || 'node';
+  const phone = tags.phone || tags['contact:phone'];
+  if(phone){
     const a = document.createElement('a');
-    a.href = `https://www.openstreetmap.org/${type}/${place.id}`;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    a.style.color = '#64b5f6';
-    a.textContent = 'View →';
-    makeRow('🗺️', 'OpenStreetMap', a);
+    a.href = 'tel:' + phone.replace(/\s/g,'');
+    a.className = 'panel-link';
+    a.textContent = phone;
+    makeRow('📞', a, true);
   }
 
-  addText('📍', 'Distance', formatDist(liveDist));
-  addWebsite(tags.website);
-  addText('📞', 'Phone', tags.phone || tags['contact:phone'] || null);
-  addText('🕐', 'Hours', tags.opening_hours || null);
-  addText('🏠', 'Address', [tags['addr:street'], tags['addr:housenumber']].filter(Boolean).join(' ') || null);
-  if(tags.wheelchair === 'yes') addText('♿', 'Accessibility', 'Wheelchair accessible');
-  if(tags.wifi === 'yes' || tags.internet_access === 'wlan') addText('📶', 'WiFi', 'Available');
-  osmLink();
+  makeRow('🕐', tags.opening_hours || null);
+
+  const addr = [tags['addr:street'], tags['addr:housenumber']].filter(Boolean).join(' ');
+  makeRow('📍', addr || null);
+
+  const perks = [];
+  if(tags.wheelchair === 'yes') perks.push('Wheelchair ✓');
+  if(tags.wifi === 'yes' || tags.internet_access === 'wlan') perks.push('WiFi ✓');
+  if(tags.takeaway === 'yes') perks.push('Takeaway');
+  if(tags.delivery === 'yes') perks.push('Delivery');
+  if(perks.length) makeRow('✨', perks.join(' · '));
 
   loadHeritageGuide(place);
 
