@@ -836,19 +836,15 @@ const MAX_DIST = 1500; // FIX: 500m too small for Fujairah/sparse cities — 150
 //  tags, dot color, emoji, and category label.
 // ─────────────────────────────────────────────
 const FILTER_DEFS = [
-  { id:'all',          label:'All',          emoji:'🌐', color:'#636366', amenityMatch:null, shopMatch:null, tourismMatch:null },
-  { id:'restaurant',   label:'Restaurants',  emoji:'🍽️', color:'#FF3B30', amenityMatch:['restaurant'] },
-  { id:'cafe',         label:'Cafés',        emoji:'☕', color:'#FF9F0A', amenityMatch:['cafe'] },
-  { id:'fast_food',    label:'Fast Food',    emoji:'🍔', color:'#FF6B35', amenityMatch:['fast_food'] },
-  { id:'bar',          label:'Bars',         emoji:'🍺', color:'#30D158', amenityMatch:['bar'] },
-  { id:'fuel',         label:'Petrol',       emoji:'⛽', color:'#64D2FF', amenityMatch:['fuel'] },
-  { id:'attraction',   label:'Attractions',  emoji:'🏛️', color:'#BF5AF2', tourismMatch:['attraction','museum','gallery','artwork','viewpoint','zoo','theme_park','aquarium'] },
-  { id:'hotel',        label:'Hotels',       emoji:'🏨', color:'#0A84FF', tourismMatch:['hotel','motel','hostel','guest_house','resort'] },
-  { id:'supermarket',  label:'Shopping',     emoji:'🛒', color:'#FF375F', shopMatch:['supermarket','mall','convenience','general'], amenityMatch:['marketplace'] },
-  { id:'pharmacy',     label:'Pharmacy',     emoji:'💊', color:'#34C759', amenityMatch:['pharmacy'], shopMatch:['pharmacy'] },
-  { id:'atm',          label:'ATM / Bank',   emoji:'🏦', color:'#FFD60A', amenityMatch:['atm','bank'] },
-  { id:'mosque',       label:'Worship',      emoji:'🕌', color:'#AC8E68', amenityMatch:['place_of_worship'] },
-  { id:'bazinga',      label:'Bazinga',      emoji:'⚡', color:'#FFD60A', isBazinga: true },
+  { id:'all',       label:'All',          emoji:'🌐', color:'#636366' },
+  { id:'food',      label:'Food & Cafés', emoji:'🍽', color:'#FF3B30',
+    amenityMatch: ['restaurant','cafe','fast_food','bar','bakery'] },
+  { id:'hotel',     label:'Stay',         emoji:'🏨', color:'#0A84FF',
+    tourismMatch: ['hotel','motel','hostel','guest_house','resort'] },
+  { id:'utilities', label:'Utilities',    emoji:'🏪', color:'#30D158',
+    amenityMatch: ['atm','bank','fuel','pharmacy','supermarket','marketplace'],
+    shopMatch:    ['supermarket','convenience','general','pharmacy','mall'] },
+  { id:'bazinga',   label:'Bazinga',      emoji:'⚡', color:'#FFD60A', isBazinga: true },
 ];
 
 // Active filter IDs — multi-select; 'all' is the default catch-all
@@ -896,69 +892,68 @@ function formatDist(m){
 }
 
 function formatCategory(tags){
-  if(tags.tourism === 'hotel' || tags.tourism === 'motel' || tags.tourism === 'hostel' || tags.tourism === 'guest_house' || tags.tourism === 'resort') return 'Hotel';
-  if(tags.tourism === 'museum') return 'Museum';
-  if(tags.tourism === 'attraction') return 'Attraction';
-  if(tags.tourism === 'viewpoint') return 'Viewpoint';
-  if(tags.tourism === 'gallery') return 'Gallery';
-  if(tags.tourism === 'zoo') return 'Zoo';
-  if(tags.tourism === 'theme_park') return 'Theme Park';
-  if(tags.tourism === 'aquarium') return 'Aquarium';
-  if(tags.tourism) return tags.tourism.replace(/_/g,' ');
-  if(tags.shop === 'supermarket') return 'Supermarket';
-  if(tags.shop === 'mall') return 'Mall';
-  if(tags.shop === 'pharmacy') return 'Pharmacy';
-  if(tags.shop) return tags.shop.replace(/_/g,' ');
-  if(tags.amenity === 'fuel') return 'Petrol Station';
-  if(tags.amenity === 'pharmacy') return 'Pharmacy';
-  if(tags.amenity === 'atm') return 'ATM';
-  if(tags.amenity === 'bank') return 'Bank';
-  if(tags.amenity === 'marketplace') return 'Market';
-  if(tags.amenity === 'place_of_worship') return tags.religion === 'muslim' ? 'Mosque' : 'Worship';
-  if(tags.amenity === 'cafe') return 'Café';
-  if(tags.amenity === 'fast_food') return 'Fast Food';
+  // Stay
+  if(tags.tourism === 'hotel')       return 'Hotel';
+  if(tags.tourism === 'motel')       return 'Motel';
+  if(tags.tourism === 'hostel')      return 'Hostel';
+  if(tags.tourism === 'guest_house') return 'Guest House';
+  if(tags.tourism === 'resort')      return 'Resort';
+  // Food & Cafés
+  if(tags.amenity === 'cafe')        return 'Café';
+  if(tags.amenity === 'fast_food')   return 'Fast Food';
+  if(tags.amenity === 'bar')         return 'Bar';
+  if(tags.amenity === 'bakery')      return 'Bakery';
   if(tags.amenity === 'restaurant'){
     if(tags.cuisine) return tags.cuisine.split(';')[0].replace(/_/g,' ');
     return 'Restaurant';
   }
-  if(tags.amenity === 'bar') return 'Bar';
+  // Utilities
+  if(tags.amenity === 'atm')         return 'ATM';
+  if(tags.amenity === 'bank')        return 'Bank';
+  if(tags.amenity === 'fuel')        return 'Petrol Station';
+  if(tags.amenity === 'pharmacy' || tags.shop === 'pharmacy') return 'Pharmacy';
+  if(tags.amenity === 'supermarket' || tags.shop === 'supermarket') return 'Supermarket';
+  if(tags.shop === 'mall')           return 'Mall';
+  if(tags.shop === 'convenience')    return 'Convenience Store';
+  if(tags.amenity === 'marketplace') return 'Market';
+  if(tags.shop)                      return tags.shop.replace(/_/g,' ');
   return 'Place';
 }
 
 function getTypeEmoji(tags){
+  // Stay
   if(tags.tourism === 'hotel' || tags.tourism === 'motel' || tags.tourism === 'hostel' || tags.tourism === 'guest_house' || tags.tourism === 'resort') return '🏨';
-  if(tags.tourism === 'museum') return '🏛️';
-  if(tags.tourism === 'attraction') return '🏛️';
-  if(tags.tourism === 'viewpoint') return '🌅';
-  if(tags.tourism === 'gallery') return '🖼️';
-  if(tags.tourism === 'zoo') return '🦁';
-  if(tags.tourism === 'theme_park') return '🎡';
-  if(tags.tourism === 'aquarium') return '🐠';
-  if(tags.shop === 'supermarket' || tags.shop === 'mall' || tags.shop === 'convenience' || tags.shop === 'general') return '🛒';
-  if(tags.shop === 'pharmacy' || tags.amenity === 'pharmacy') return '💊';
-  if(tags.amenity === 'fuel') return '⛽';
-  if(tags.amenity === 'atm') return '🏧';
-  if(tags.amenity === 'bank') return '🏦';
-  if(tags.amenity === 'marketplace') return '🛒';
-  if(tags.amenity === 'place_of_worship') return '🕌';
-  if(tags.amenity === 'cafe') return '☕';
+  // Food & Cafés
+  if(tags.amenity === 'cafe')      return '☕';
   if(tags.amenity === 'fast_food') return '🍔';
-  if(tags.amenity === 'bar') return '🍺';
-  return '🍽️';
+  if(tags.amenity === 'bar')       return '🍺';
+  if(tags.amenity === 'bakery')    return '🥐';
+  // Utilities
+  if(tags.amenity === 'atm')       return '🏧';
+  if(tags.amenity === 'bank')      return '🏦';
+  if(tags.amenity === 'fuel')      return '⛽';
+  if(tags.amenity === 'pharmacy' || tags.shop === 'pharmacy') return '💊';
+  if(tags.amenity === 'supermarket' || tags.shop === 'supermarket' || tags.shop === 'convenience' || tags.shop === 'mall') return '🛒';
+  if(tags.amenity === 'marketplace') return '🏪';
+  // Default food
+  return '🍽';
 }
 
 function getDotColor(tags){
-  if(tags.amenity === 'cafe')              return [255,159,10];
-  if(tags.amenity === 'fast_food')         return [255,107,53];
-  if(tags.amenity === 'bar')               return [48,209,88];
-  if(tags.amenity === 'fuel')              return [100,210,255];
-  if(tags.amenity === 'pharmacy' || tags.shop === 'pharmacy') return [52,199,89];
-  if(tags.amenity === 'atm' || tags.amenity === 'bank') return [255,214,10];
-  if(tags.amenity === 'marketplace')       return [255,55,95];
-  if(tags.amenity === 'place_of_worship')  return [172,142,104];
+  // Stay — blue
   if(tags.tourism === 'hotel' || tags.tourism === 'motel' || tags.tourism === 'hostel' || tags.tourism === 'guest_house' || tags.tourism === 'resort') return [10,132,255];
-  if(tags.tourism)                         return [191,90,242];
-  if(tags.shop)                            return [255,55,95];
+  // Food & Cafés — red/orange palette
+  if(tags.amenity === 'cafe')      return [255,159,10];
+  if(tags.amenity === 'fast_food') return [255,107,53];
+  if(tags.amenity === 'bar')       return [255,45,85];
+  if(tags.amenity === 'bakery')    return [255,179,64];
+  // Utilities — green/yellow
+  if(tags.amenity === 'atm' || tags.amenity === 'bank')      return [255,214,10];
+  if(tags.amenity === 'fuel')                                 return [100,210,255];
+  if(tags.amenity === 'pharmacy' || tags.shop === 'pharmacy') return [48,209,88];
+  if(tags.amenity === 'supermarket' || tags.shop === 'supermarket' || tags.shop === 'convenience' || tags.shop === 'mall') return [48,209,88];
+  if(tags.amenity === 'marketplace') return [48,209,88];
+  // Default food — red
   return [255,59,48];
 }
 
@@ -1136,13 +1131,20 @@ async function fetchPlaces(lat, lon){
   if(fetchRetryTimer !== null){ clearTimeout(fetchRetryTimer); fetchRetryTimer = null; }
 
   // Overpass QL query — kept identical to original
+  // OSM query — scoped to the 4 filter categories only
+  const _a = MAX_DIST + ',' + lat + ',' + lon;
   const query = '[out:json][timeout:20];(' +
-    'node["amenity"~"restaurant|cafe|fast_food|bar|fuel|pharmacy|atm|bank|marketplace|place_of_worship"](around:' + MAX_DIST + ',' + lat + ',' + lon + ');' +
-    'way["amenity"~"restaurant|cafe|fast_food|bar|fuel|pharmacy|atm|bank|marketplace|place_of_worship"](around:' + MAX_DIST + ',' + lat + ',' + lon + ');' +
-    'node["tourism"~"attraction|museum|gallery|artwork|viewpoint|zoo|theme_park|aquarium|hotel|motel|hostel|guest_house|resort"](around:' + MAX_DIST + ',' + lat + ',' + lon + ');' +
-    'way["tourism"~"attraction|museum|gallery|artwork|viewpoint|zoo|theme_park|aquarium|hotel|motel|hostel|guest_house|resort"](around:' + MAX_DIST + ',' + lat + ',' + lon + ');' +
-    'node["shop"~"supermarket|mall|convenience|general|pharmacy"](around:' + MAX_DIST + ',' + lat + ',' + lon + ');' +
-    'way["shop"~"supermarket|mall|convenience|general|pharmacy"](around:' + MAX_DIST + ',' + lat + ',' + lon + ');' +
+    // Food & Cafés
+    'node["amenity"~"restaurant|cafe|fast_food|bar|bakery"](around:' + _a + ');' +
+    'way["amenity"~"restaurant|cafe|fast_food|bar|bakery"](around:'  + _a + ');' +
+    // Stay
+    'node["tourism"~"hotel|motel|hostel|guest_house|resort"](around:' + _a + ');' +
+    'way["tourism"~"hotel|motel|hostel|guest_house|resort"](around:'  + _a + ');' +
+    // Utilities
+    'node["amenity"~"atm|bank|fuel|pharmacy|supermarket|marketplace"](around:' + _a + ');' +
+    'way["amenity"~"atm|bank|fuel|pharmacy|supermarket|marketplace"](around:'  + _a + ');' +
+    'node["shop"~"supermarket|mall|convenience|general|pharmacy"](around:' + _a + ');' +
+    'way["shop"~"supermarket|mall|convenience|general|pharmacy"](around:'  + _a + ');' +
     ');out center tags;';
   const body = 'data=' + encodeURIComponent(query);
 
