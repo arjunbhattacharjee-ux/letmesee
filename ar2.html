@@ -1002,7 +1002,7 @@ function handleFilterTap(fid){
   filterBar.querySelectorAll('.filter-chip').forEach(chip => {
     chip.classList.toggle('active', state_filters.has(chip.dataset.fid));
   });
-  const visible = state.places.filter(placePassesFilter).length;
+  const visible = state.places.filter(placePassesFilter).length + (state.bazingaPlaces || []).length;
   placeCount.textContent = visible;
 }
 
@@ -1095,7 +1095,7 @@ async function fetchPlaces(lat, lon){
       const parsed = JSON.parse(cached);
       if(Array.isArray(parsed) && parsed.length > 0){
         state.places = parsed.map(p => ({ ...p, dist: haversine(lat, lon, p.lat, p.lon) }));
-        placeCount.textContent = state.places.filter(placePassesFilter).length;
+        placeCount.textContent = state.places.filter(placePassesFilter).length + (state.bazingaPlaces || []).length;
         statusPill.textContent = state.places.length + ' places nearby (cached)';
         dbg('Cache hit — ' + state.places.length + ' places, age=' + Math.round(ageSec) + 's moved=' + Math.round(movedM) + 'm');
         fetchFailed = false;
@@ -1201,7 +1201,7 @@ async function fetchPlaces(lat, lon){
 
     dbg('Raw=' + data.elements.length + ' named=' + afterNull.length + ' inRadius=' + afterRadius.length + ' final=' + sorted.length);
     state.places = sorted;
-    placeCount.textContent = sorted.filter(placePassesFilter).length;
+    placeCount.textContent = sorted.filter(placePassesFilter).length + (state.bazingaPlaces || []).length;
     fetchFailed = false;
     currentRadius = MAX_DIST;
 
@@ -2106,10 +2106,8 @@ async function loadHeritageGuide(place) {
   }
 
   try {
-    if (guideType === 'food' || guideType === 'shop') {
-      // ── Food / Shop: call /api/food (Groq web-search + summary) ──────────────
-      // FIX 3: pass full tags so food.js can build an accurate typeHint
-      // (e.g. tags.shop='supermarket' prevents Choithrams → actress confusion)
+    if (guideType === 'food') {
+      // ── Food: call /api/food (Groq web-search + summary) ──────────────
       const res = await fetch('/api/food', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2117,7 +2115,6 @@ async function loadHeritageGuide(place) {
       });
       if (!res.ok) throw new Error('food api ' + res.status);
       const data = await res.json();
-      // null summary means NO_INFO was returned — hide card rather than show bad content
       if (!data.summary) { card.classList.remove('visible'); return; }
 
       const parsed = parseGroqResponse(data.summary);
@@ -2125,13 +2122,8 @@ async function loadHeritageGuide(place) {
       renderFacts(factsEl, parsed.facts, guideType);
 
       const zq = encodeURIComponent(place.name + (city ? ' ' + city : ''));
-      if (guideType === 'shop') {
-        wikiLink.href = 'https://www.google.com/maps/search/?api=1&query=' + zq;
-        wikiLink.textContent = '🗺 View on Google Maps →';
-      } else {
-        wikiLink.href = 'https://www.zomato.com/search?q=' + zq;
-        wikiLink.textContent = '🍽 View on Zomato →';
-      }
+      wikiLink.href = 'https://www.zomato.com/search?q=' + zq;
+      wikiLink.textContent = '🍽 View on Zomato →';
       wikiLink.style.display = 'inline-flex';
       return;
     }
@@ -2351,6 +2343,9 @@ async function fetchBazingaPlaces(lat, lon) {
       tags: {},
     }));
     dbg('Bazinga loaded: ' + state.bazingaPlaces.length + ' spots');
+    // Update count badge to include bazinga spots
+    const totalVisible = state.places.filter(placePassesFilter).length + state.bazingaPlaces.length;
+    placeCount.textContent = totalVisible;
   } catch(e) { dbg('fetchBazingaPlaces: ' + e.message); }
 }
 
