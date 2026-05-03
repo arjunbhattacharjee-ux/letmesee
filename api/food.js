@@ -1,12 +1,12 @@
 // /api/food.js — Vercel Edge function
-// Searches the web for restaurant/cafe/shop info using Groq + web search tool,
-// returns a tourist-friendly summary + 2 fun facts.
+// Returns a tourist-friendly summary + 2 fun facts for restaurants, cafes, shops, etc.
 //
-// Anti-hallucination fixes applied:
-//  1. Removed "make something up" fallback instruction — model returns NO_INFO instead.
-//  2. Added strict grounding instruction: never confuse the place with a similarly named entity.
-//  3. typeHint now covers shop tags (supermarket, mall, etc.) passed from ar2.html.
-//  4. Web search tool enabled on the Groq call so the model can look up real data.
+// Anti-hallucination fixes:
+//  1. NO_INFO sentinel — model returns NO_INFO instead of fabricating for truly unknown places.
+//  2. Strict grounding instruction — never confuse place with a similarly named person/entity.
+//  3. typeHint covers shop tags (supermarket, mall, etc.) so the model has a clear anchor.
+//  (Fix 4 / web search tool removed — Groq's function-calling doesn't support live web search,
+//   it caused silent failures. Well-known places still work fine from model knowledge.)
 
 export const config = { runtime: 'edge' };
 
@@ -59,28 +59,31 @@ export default async function handler(req) {
     tags.amenity === 'marketplace' ? 'marketplace' :
                                      'restaurant';
 
-  // FIX 1 & 2: No "make something up" fallback. Strict grounding + NO_INFO sentinel.
-  const systemPrompt = `You are a concise local guide with access to a web search tool.
-CRITICAL RULES — violating any of these is a failure:
-- You MUST use the web search tool to look up "${locationContext}" before writing anything.
-- Write ONLY about the specific place named. NEVER confuse it with a person, film, TV show, or any other entity with a similar name.
-- If the place name resembles a person's name or something unrelated, that is a coincidence — search specifically for the ${typeHint} called "${placeName}" in ${city || 'the given location'}.
-- If your search returns no reliable information about this specific ${typeHint}, respond with exactly: NO_INFO
-- Do NOT invent facts, generalise, or fill gaps with assumptions. If unsure, return NO_INFO.
+  // FIX 1 & 2: Strict grounding. NO_INFO sentinel for truly unknown places.
+  // Well-known chains/restaurants the model knows about will still get descriptions.
+  // The key change: we only return NO_INFO for places the model genuinely cannot
+  // identify — not for well-known brands like Elegant Elephant, Choithrams, etc.
+  const systemPrompt = `You are a concise local guide writing for tourists.
+IMPORTANT RULES:
+- You are describing "${placeName}", a ${typeHint} located in ${city || 'the local area'}.
+- NEVER confuse this place with a person, actor, film, TV show, or any other entity that has a similar name. The name refers specifically to this ${typeHint}, not any person or media.
+- If you have genuine knowledge of this specific ${typeHint} (e.g. it is a known chain, brand, or establishment), write about it.
+- If you have NO specific knowledge of this exact place AND cannot make a reasonable, accurate inference from the cuisine type and location context, respond with exactly: NO_INFO
+- Do NOT invent specific facts (awards, founding dates, named dishes) you are not sure about.
 - No markdown, no bullet points, no asterisks.`;
 
-  const userPrompt = `Search for "${locationContext}", a ${typeHint}${cuisineHint}. Then write a 2-sentence tourist-friendly description covering the vibe, must-try items, price range, or what makes it special.
+  const userPrompt = `Write a 2-sentence tourist-friendly description of "${locationContext}", a ${typeHint}${cuisineHint}. Cover the vibe, must-try items, price range, or what makes it special. Be specific and engaging — if it is a known chain or brand, mention what it is known for.
 
-Output format — plain text only:
+Output format — plain text only, no markdown, no asterisks:
 [Your 2-sentence description here]
-FACT: [one fun fact or insider tip about this specific place, under 20 words]
+FACT: [one fun fact or insider tip about this place or its cuisine, under 20 words]
 FACT: [a second fun fact or practical tip, under 20 words]
 
-If you cannot find reliable information about this specific place, output only: NO_INFO`;
+Only if you truly have no usable knowledge about this specific place: NO_INFO`;
 
   let summary = null;
 
-  // FIX 4: Enable Groq web_search tool so the model fetches real data before responding
+  // Primary call
   try {
     const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
@@ -90,25 +93,8 @@ If you cannot find reliable information about this specific place, output only: 
       },
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
-        max_tokens: 400,
-        temperature: 0.3,           // lower temp = less creative fabrication
-        tools: [
-          {
-            type: 'function',
-            function: {
-              name: 'web_search',
-              description: 'Search the web for up-to-date information about a place.',
-              parameters: {
-                type: 'object',
-                properties: {
-                  query: { type: 'string', description: 'The search query' },
-                },
-                required: ['query'],
-              },
-            },
-          },
-        ],
-        tool_choice: 'auto',
+        max_tokens: 300,
+        temperature: 0.5,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user',   content: userPrompt  },
@@ -119,7 +105,7 @@ If you cannot find reliable information about this specific place, output only: 
     if (groqRes.ok) {
       const data = await groqRes.json();
       const content = data.choices?.[0]?.message?.content?.trim();
-      // FIX 1: Treat NO_INFO sentinel as "no data" — return null so frontend hides the card
+      // FIX 1: Honour NO_INFO sentinel — hide card rather than show hallucinated content
       if (content && content.length > 20 && content !== 'NO_INFO') {
         summary = content;
       }
@@ -129,7 +115,7 @@ If you cannot find reliable information about this specific place, output only: 
     }
   } catch (e) { /* fall through to fallback */ }
 
-  // Fallback: strict prompt, no web search tool, but still grounded + NO_INFO aware
+  // Fallback: simpler prompt, same grounding rules
   if (!summary) {
     try {
       const fallbackRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -140,20 +126,17 @@ If you cannot find reliable information about this specific place, output only: 
         },
         body: JSON.stringify({
           model: 'llama-3.3-70b-versatile',
-          max_tokens: 250,
-          temperature: 0.2,
+          max_tokens: 200,
+          temperature: 0.4,
           messages: [
             {
               role: 'system',
-              // FIX 2 (fallback): Same strict grounding, no hallucination permission
-              content: `You are a concise local guide. Only write about the specific ${typeHint} named "${placeName}" in ${city || 'the given location'}.
-NEVER confuse it with a similarly named person, film, TV show, or unrelated entity.
-If you have no reliable information about this specific place, respond with exactly: NO_INFO
-Do not invent, generalise, or fill gaps with assumptions.`,
+              // FIX 2: Same strict grounding in fallback
+              content: `You are a concise local guide. You are describing "${placeName}", a ${typeHint} in ${city || 'the local area'}. NEVER confuse this with a person, actor, or media property with a similar name. If you have no usable knowledge of this specific place, respond with: NO_INFO`,
             },
             {
               role: 'user',
-              content: `Write a 2-sentence tourist-friendly description of "${locationContext}", a ${typeHint}${cuisineHint}. Focus on the vibe and what makes it worth visiting. If you have no specific knowledge of this exact place, respond with: NO_INFO`,
+              content: `Write a 2-sentence tourist-friendly description of "${locationContext}", a ${typeHint}${cuisineHint}. Focus on cuisine, vibe, and what makes it worth visiting. If you truly have no knowledge of this place, respond with: NO_INFO`,
             },
           ],
         }),
@@ -169,7 +152,7 @@ Do not invent, generalise, or fill gaps with assumptions.`,
     } catch (_) { /* silent */ }
   }
 
-  // Return null summary — ar2.html already hides the card when summary is null
+  // Return null summary — ar2.html hides the card when summary is null
   return new Response(JSON.stringify({ summary: summary ?? null }), {
     status: 200,
     headers: {
