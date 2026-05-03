@@ -9,30 +9,35 @@
 export const config = { runtime: 'edge' };
 
 // ─── Tavily search ────────────────────────────────────────────────────────────
-async function tavilySearch(query, tavilyKey, maxResults = 8) {
+async function tavilySearch(query, tavilyKey, maxResults = 8, daysBack = null) {
+  const payload = {
+    api_key: tavilyKey,
+    query,
+    search_depth: 'basic',
+    max_results: maxResults,
+    include_answer: false,
+    include_raw_content: false,
+  };
+  // Tavily supports days_back to restrict recency
+  if (daysBack) payload.days = daysBack;
+
   const res = await fetch('https://api.tavily.com/search', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      api_key: tavilyKey,
-      query,
-      search_depth: 'basic',   // 'advanced' uses 2 credits; basic = 1
-      max_results: maxResults,
-      include_answer: false,
-      include_raw_content: false,
-    }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error('Tavily error: ' + res.status);
   const data = await res.json();
-  return data.results || [];   // [{ title, url, content, score }]
+  return data.results || [];  // [{ title, url, content, score, published_date? }]
 }
 
-// ─── Format search results into a compact context block for Llama ─────────────
+// ─── Format results into a compact context block for Llama ───────────────────
 function buildContext(results) {
   return results
-    .map((r, i) =>
-      `[${i + 1}] ${r.title}\nURL: ${r.url}\n${(r.content || '').slice(0, 400)}`
-    )
+    .map((r, i) => {
+      const date = r.published_date ? `Published: ${r.published_date}` : '';
+      return `[${i + 1}] ${r.title}\nURL: ${r.url}\n${date}\n${(r.content || '').slice(0, 400)}`;
+    })
     .join('\n\n');
 }
 
@@ -48,6 +53,16 @@ function extractJSON(text) {
     try { return JSON.parse(match[0]); } catch (_) {}
   }
   return null;
+}
+
+// ─── Check if a date string is within the past N days ────────────────────────
+function isWithinDays(dateStr, days) {
+  if (!dateStr) return true; // no date = don't filter out
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return true;
+    return (Date.now() - d.getTime()) <= days * 24 * 60 * 60 * 1000;
+  } catch (_) { return true; }
 }
 
 // ─── Main handler ─────────────────────────────────────────────────────────────
@@ -77,44 +92,59 @@ export default async function handler(req) {
 
   const locationLabel = city || `${lat.toFixed(3)},${lon.toFixed(3)}`;
 
+  // Get current date for prompting Llama with context
+  const now = new Date();
+  const todayStr = now.toISOString().slice(0, 10); // YYYY-MM-DD
+  const monthAgo = new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
   // ── Step 1: Run 2 Tavily searches in parallel ─────────────────────────────
-  // One for recent news, one for historical/notable stories
-  let searchResults = [];
+  // Recent news: hard-limited to past 30 days via Tavily's days param
+  // Historical: no date limit — notable/sensational older stories
+  let recentResults = [];
+  let historyResults = [];
   try {
-    const [recentResults, historyResults] = await Promise.all([
-      tavilySearch(`${locationLabel} news 2024 2025`, tavilyKey, 6),
-      tavilySearch(`${locationLabel} famous incident history notable`, tavilyKey, 5),
+    [recentResults, historyResults] = await Promise.all([
+      tavilySearch(`${locationLabel} news incident`, tavilyKey, 7, 30),
+      tavilySearch(`${locationLabel} famous notable historical event`, tavilyKey, 5, null),
     ]);
-    searchResults = [...recentResults, ...historyResults];
   } catch (e) {
     console.error('Tavily search failed:', e.message);
-    // Return empty rather than hallucinate
     return new Response(JSON.stringify({ spots: [] }), {
       status: 200, headers: { 'Content-Type': 'application/json' },
     });
   }
 
-  if (searchResults.length === 0) {
+  // Tag results so Llama knows which are recent vs historical
+  const taggedRecent  = recentResults.map(r  => ({ ...r, _type: 'recent' }));
+  const taggedHistory = historyResults.map(r => ({ ...r, _type: 'history' }));
+  const allResults = [...taggedRecent, ...taggedHistory];
+
+  if (allResults.length === 0) {
     return new Response(JSON.stringify({ spots: [] }), {
       status: 200, headers: { 'Content-Type': 'application/json' },
     });
   }
 
-  // ── Step 2: Pass real search results to Llama to extract & format spots ───
-  const context = buildContext(searchResults);
+  // ── Step 2: Pass real search results to Llama ─────────────────────────────
+  const context = buildContext(allResults);
 
-  const systemPrompt = `You are a hyperlocal news analyst. You will be given real search result snippets about a location. Extract the most interesting stories and return them as a JSON array. Only use information present in the search results — do not invent or add anything. Return ONLY raw JSON, no markdown, no commentary.`;
+  const systemPrompt = `You are a hyperlocal news analyst. Today's date is ${todayStr}. You will be given real search result snippets about a location. Extract the most interesting stories and return them as a JSON array. Only use information present in the search results — do not invent anything. Return ONLY raw JSON, no markdown, no commentary.`;
 
   const userPrompt = `Location: ${locationLabel} (coordinates: ${lat.toFixed(4)}, ${lon.toFixed(4)})
+Today's date: ${todayStr}
 
-Here are real search results about this location:
+Here are real search results about this location (results marked [recent] are from the past 30 days):
 
 ${context}
 
-Extract 4–6 of the most interesting stories from these results. For each story:
-- Use only facts from the search snippets above
+Extract 4–6 of the most interesting stories. Rules:
+- Only use facts from the snippets above — do not invent anything
+- For each story, extract or estimate the date it happened:
+  - For recent news: use the published date from the snippet (format: YYYY-MM-DD or "Month YYYY")
+  - For historical events: use the year or approximate date mentioned in the text
+  - If no date is found: use null
 - Estimate a lat/lon near where it happened (within 0.04 degrees of ${lat.toFixed(4)}, ${lon.toFixed(4)})
-- Pick the most relevant URL from the results
+- Use the URL from the matching search result
 
 Return ONLY a valid JSON array:
 [
@@ -123,11 +153,15 @@ Return ONLY a valid JSON array:
     "headline": "One punchy sentence",
     "summary": "2-3 sentences using only facts from the search results above.",
     "category": "Crime|Politics|Traffic|Events|Environment|History|Quirky|Business",
+    "date": "2025-04-15",
+    "date_label": "Apr 2025",
     "lat": ${lat.toFixed(4)},
     "lon": ${lon.toFixed(4)},
     "url": "https://source-url-from-results-above-or-null"
   }
-]`;
+]
+
+For date_label use a human-readable string like "15 Apr 2025", "March 2024", "2019", or null if unknown.`;
 
   let spots = null;
 
@@ -140,8 +174,8 @@ Return ONLY a valid JSON array:
       },
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
-        max_tokens: 1500,
-        temperature: 0.3,   // low — we want factual extraction, not creativity
+        max_tokens: 1800,
+        temperature: 0.3,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user',   content: userPrompt   },
@@ -166,17 +200,25 @@ Return ONLY a valid JSON array:
     });
   }
 
-  // ── Step 3: Sanitise — clamp coords, enforce required fields ─────────────
+  // ── Step 3: Sanitise + enforce 30-day rule on recent news ────────────────
   const clean = spots
-    .filter(s => s && s.summary && s.lat && s.lon)
+    .filter(s => {
+      if (!s || !s.summary || !s.lat || !s.lon) return false;
+      // If category looks like recent news (not History), enforce 30-day cutoff
+      const isHistorical = (s.category || '').toLowerCase() === 'history';
+      if (!isHistorical && s.date && !isWithinDays(s.date, 30)) return false;
+      return true;
+    })
     .map(s => ({
-      name:     (s.name     || 'Local Story').slice(0, 40),
-      headline: (s.headline || s.name || 'Nearby Story').slice(0, 100),
-      summary:  (s.summary  || '').slice(0, 400),
-      category: s.category || 'News',
-      lat:      Math.max(lat - 0.04, Math.min(lat + 0.04, parseFloat(s.lat))),
-      lon:      Math.max(lon - 0.04, Math.min(lon + 0.04, parseFloat(s.lon))),
-      url:      s.url && s.url.startsWith('http') ? s.url : null,
+      name:       (s.name       || 'Local Story').slice(0, 40),
+      headline:   (s.headline   || s.name || 'Nearby Story').slice(0, 100),
+      summary:    (s.summary    || '').slice(0, 400),
+      category:   s.category   || 'News',
+      date:       s.date        || null,
+      date_label: s.date_label  || null,
+      lat:        Math.max(lat - 0.04, Math.min(lat + 0.04, parseFloat(s.lat))),
+      lon:        Math.max(lon - 0.04, Math.min(lon + 0.04, parseFloat(s.lon))),
+      url:        s.url && s.url.startsWith('http') ? s.url : null,
     }))
     .slice(0, 6);
 
@@ -184,7 +226,7 @@ Return ONLY a valid JSON array:
     status: 200,
     headers: {
       'Content-Type': 'application/json',
-      'Cache-Control': 'public, s-maxage=900',  // 15 min cache
+      'Cache-Control': 'public, s-maxage=900',
     },
   });
 }
