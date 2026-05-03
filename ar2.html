@@ -879,7 +879,7 @@ async function fetchPlaces(lat, lon){
   if(fetchRetryTimer !== null){ clearTimeout(fetchRetryTimer); fetchRetryTimer = null; }
 
   // Overpass QL query — kept identical to original
-  const query = '[out:json][timeout:30];(' +
+  const query = '[out:json][timeout:20];(' +
     'node["amenity"~"restaurant|cafe|fast_food|bar|fuel|pharmacy|atm|bank|marketplace|place_of_worship"](around:' + MAX_DIST + ',' + lat + ',' + lon + ');' +
     'way["amenity"~"restaurant|cafe|fast_food|bar|fuel|pharmacy|atm|bank|marketplace|place_of_worship"](around:' + MAX_DIST + ',' + lat + ',' + lon + ');' +
     'node["tourism"~"attraction|museum|gallery|artwork|viewpoint|zoo|theme_park|aquarium|hotel|motel|hostel|guest_house|resort"](around:' + MAX_DIST + ',' + lat + ',' + lon + ');' +
