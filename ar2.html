@@ -5,19 +5,32 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>AR Eats</title>
+<meta name="theme-color" content="#0a0a0f">
+<title>ARScout — Discover Around You</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
   :root {
-    --accent: #FF3B30;
-    --accent2: #FF9F0A;
-    --glass: rgba(10,10,12,0.72);
-    --glass-light: rgba(255,255,255,0.08);
-    --text: #FFFFFF;
-    --text-dim: rgba(255,255,255,0.55);
-    --radius: 18px;
-    --font: 'DM Sans', 'Helvetica Neue', sans-serif;
+    --accent:      #FF3B30;
+    --accent2:     #FF9F0A;
+    --blue:        #0A84FF;
+    --green:       #30D158;
+    --purple:      #BF5AF2;
+    --glass:       rgba(8,8,14,0.78);
+    --glass-light: rgba(255,255,255,0.07);
+    --glass-mid:   rgba(255,255,255,0.12);
+    --text:        #FFFFFF;
+    --text-dim:    rgba(255,255,255,0.48);
+    --text-mid:    rgba(255,255,255,0.72);
+    --border:      rgba(255,255,255,0.10);
+    --border-mid:  rgba(255,255,255,0.18);
+    --radius:      20px;
+    --radius-sm:   12px;
+    --font-display: 'Syne', sans-serif;
+    --font:        'DM Sans', 'Helvetica Neue', sans-serif;
+    --shadow:      0 8px 32px rgba(0,0,0,0.5);
   }
 
   html, body {
@@ -27,14 +40,14 @@
     font-family: var(--font);
     color: var(--text);
     touch-action: none;
+    -webkit-font-smoothing: antialiased;
   }
 
-  /* ── camera feed ── */
+  /* ── Camera ── */
   #video {
     position: fixed; inset: 0;
     width: 100%; height: 100%;
     object-fit: cover;
-    transform: scaleX(1);
   }
 
   /* ── AR canvas ── */
@@ -44,375 +57,566 @@
     pointer-events: none;
   }
 
-  /* ── dot hit targets (invisible, for touch) ── */
+  /* ── Dot hit targets ── */
   #dot-layer {
     position: fixed; inset: 0;
     width: 100%; height: 100%;
   }
-
   .dot-hit {
     position: absolute;
     transform: translate(-50%, -50%);
-    width: 56px; height: 56px;
+    width: 60px; height: 60px;
     border-radius: 50%;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
 
+  /* ── Crosshair ── */
+  #crosshair {
+    position: fixed; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 28px; height: 28px;
+    pointer-events: none;
+    z-index: 5; opacity: 0.35;
+  }
+  #crosshair::before, #crosshair::after {
+    content: ''; position: absolute; background: rgba(255,255,255,0.8);
+    border-radius: 1px;
+  }
+  #crosshair::before { width: 1.5px; height: 100%; left: 50%; top: 0; transform: translateX(-50%); }
+  #crosshair::after  { width: 100%; height: 1.5px; top: 50%; left: 0; transform: translateY(-50%); }
+  #crosshair-dot {
+    position: fixed; top: 50%; left: 50%;
+    width: 5px; height: 5px;
+    background: #fff;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 5; opacity: 0.5;
+  }
+
   /* ── HUD top bar ── */
   #hud {
     position: fixed; top: 0; left: 0; right: 0;
-    padding: env(safe-area-inset-top, 16px) 20px 14px;
-    padding-top: calc(env(safe-area-inset-top, 16px) + 14px);
+    padding: calc(env(safe-area-inset-top, 16px) + 12px) 20px 16px;
     display: flex; align-items: center; justify-content: space-between;
-    background: linear-gradient(to bottom, rgba(0,0,0,0.6) 0%, transparent 100%);
+    background: linear-gradient(to bottom, rgba(0,0,0,0.65) 0%, transparent 100%);
     pointer-events: none;
     z-index: 10;
   }
 
+  #app-brand {
+    display: flex; align-items: center; gap: 9px;
+  }
+  #app-logo {
+    width: 34px; height: 34px;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 17px;
+    flex-shrink: 0;
+    box-shadow: 0 2px 12px rgba(255,59,48,0.4);
+  }
   #app-title {
-    font-size: 22px; font-weight: 700;
-    letter-spacing: -0.5px;
+    font-family: var(--font-display);
+    font-size: 20px; font-weight: 700;
+    letter-spacing: -0.3px;
+    line-height: 1;
   }
   #app-title span { color: var(--accent); }
 
+  #hud-right {
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  #gps-indicator {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 11px; font-weight: 500;
+    padding: 5px 11px; border-radius: 20px;
+    background: var(--glass);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 0.5px solid var(--border);
+  }
+  #gps-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--text-dim);
+    transition: background 0.4s;
+  }
+  #gps-dot.locked { background: var(--green); box-shadow: 0 0 6px rgba(48,209,88,0.6); }
+  #gps-dot.searching { background: var(--accent2); animation: gpspulse 1.2s ease-in-out infinite; }
+  @keyframes gpspulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
   #status-pill {
-    font-size: 12px; font-weight: 500;
-    padding: 5px 12px; border-radius: 20px;
+    font-size: 11.5px; font-weight: 500;
+    padding: 5px 13px; border-radius: 20px;
     background: var(--glass);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 0.5px solid rgba(255,255,255,0.15);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 0.5px solid var(--border);
     pointer-events: none;
+    color: var(--text-mid);
+    max-width: 160px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
-  /* ── compass ring ── */
+  /* ── Compass ── */
   #compass-wrap {
-    position: fixed; bottom: 120px; right: 20px;
-    width: 52px; height: 52px;
+    position: fixed; bottom: 130px; right: 18px;
+    width: 56px; height: 56px;
     z-index: 10;
+    filter: drop-shadow(0 4px 12px rgba(0,0,0,0.5));
   }
-  #compass-svg { width: 100%; height: 100%; transition: transform 0.15s ease; }
+  #compass-svg { width: 100%; height: 100%; transition: transform 0.12s ease; }
 
-  /* ── count badge ── */
+  /* ── Count badge ── */
   #count-badge {
-    position: fixed; bottom: 120px; left: 20px;
+    position: fixed; bottom: 130px; left: 18px;
     background: var(--glass);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 0.5px solid rgba(255,255,255,0.15);
-    border-radius: 14px;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 0.5px solid var(--border);
+    border-radius: 16px;
     padding: 10px 16px;
     z-index: 10;
-    font-size: 13px; color: var(--text-dim);
+    box-shadow: var(--shadow);
   }
-  #count-badge strong { color: var(--text); font-weight: 600; font-size: 18px; display: block; }
+  #count-badge strong {
+    font-family: var(--font-display);
+    color: var(--text); font-size: 22px;
+    font-weight: 700; display: block;
+    line-height: 1;
+  }
+  #count-label { font-size: 11px; color: var(--text-dim); margin-top: 2px; font-weight: 400; }
 
-  /* ── permission / loading screen ── */
+  /* ── Splash screen ── */
   #splash {
     position: fixed; inset: 0;
-    background: #0a0a0c;
+    background: #0a0a0f;
     display: flex; flex-direction: column;
     align-items: center; justify-content: center;
-    gap: 20px; z-index: 100;
-    padding: 40px;
+    gap: 0; z-index: 100;
+    padding: 0 32px;
     text-align: center;
+    overflow: hidden;
   }
 
-  .splash-icon {
-    width: 80px; height: 80px;
-    background: linear-gradient(135deg, var(--accent), var(--accent2));
-    border-radius: 24px;
+  /* Animated background grid */
+  #splash::before {
+    content: '';
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(255,59,48,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,59,48,0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+    animation: gridmove 20s linear infinite;
+    pointer-events: none;
+  }
+  @keyframes gridmove { from{background-position:0 0} to{background-position:40px 40px} }
+
+  /* Glow orb */
+  #splash::after {
+    content: '';
+    position: absolute;
+    width: 320px; height: 320px;
+    background: radial-gradient(circle, rgba(255,59,48,0.12) 0%, transparent 70%);
+    top: 30%; left: 50%; transform: translate(-50%, -50%);
+    pointer-events: none;
+    animation: orbpulse 4s ease-in-out infinite;
+  }
+  @keyframes orbpulse { 0%,100%{transform:translate(-50%,-50%) scale(1)} 50%{transform:translate(-50%,-50%) scale(1.2)} }
+
+  .splash-logo {
+    width: 88px; height: 88px;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%);
+    border-radius: 26px;
     display: flex; align-items: center; justify-content: center;
-    font-size: 36px;
-    margin-bottom: 8px;
-    animation: pulse 2s ease-in-out infinite;
+    font-size: 42px;
+    margin-bottom: 28px;
+    position: relative; z-index: 1;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.08), 0 20px 60px rgba(255,59,48,0.35);
+    animation: logobob 3s ease-in-out infinite;
   }
-  @keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.06)} }
+  @keyframes logobob { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
 
-  .splash-title { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; }
+  .splash-eyebrow {
+    font-size: 11px; font-weight: 600;
+    letter-spacing: 2.5px; text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 10px;
+    position: relative; z-index: 1;
+  }
+
+  .splash-title {
+    font-family: var(--font-display);
+    font-size: 38px; font-weight: 800;
+    letter-spacing: -1px; line-height: 1.05;
+    margin-bottom: 14px;
+    position: relative; z-index: 1;
+  }
   .splash-title span { color: var(--accent); }
-  .splash-sub { font-size: 15px; color: var(--text-dim); line-height: 1.6; max-width: 300px; }
+
+  .splash-sub {
+    font-size: 15px; color: var(--text-dim);
+    line-height: 1.65; max-width: 290px;
+    margin-bottom: 36px;
+    position: relative; z-index: 1;
+    font-weight: 300;
+  }
+
+  .splash-features {
+    display: flex; gap: 10px; flex-wrap: wrap;
+    justify-content: center;
+    margin-bottom: 36px;
+    position: relative; z-index: 1;
+  }
+  .splash-feature-pill {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px; font-weight: 500; color: var(--text-mid);
+    background: var(--glass-light);
+    border: 0.5px solid var(--border-mid);
+    border-radius: 20px;
+    padding: 6px 13px;
+  }
 
   .btn-primary {
-    background: var(--accent);
+    background: linear-gradient(135deg, var(--accent) 0%, #e02d23 100%);
     color: #fff; border: none;
     font-family: var(--font);
     font-size: 16px; font-weight: 600;
-    padding: 16px 36px; border-radius: 50px;
-    cursor: pointer; width: 100%; max-width: 280px;
-    transition: opacity 0.15s, transform 0.1s;
+    padding: 17px 36px; border-radius: 50px;
+    cursor: pointer; width: 100%; max-width: 300px;
+    transition: transform 0.15s, box-shadow 0.15s;
     letter-spacing: -0.2px;
+    position: relative; z-index: 1;
+    box-shadow: 0 4px 20px rgba(255,59,48,0.35);
   }
-  .btn-primary:active { opacity: 0.85; transform: scale(0.97); }
+  .btn-primary:active { transform: scale(0.97); box-shadow: 0 2px 10px rgba(255,59,48,0.25); }
 
   .btn-secondary {
-    background: var(--glass-light);
-    color: var(--text-dim); border: 0.5px solid rgba(255,255,255,0.2);
+    background: transparent;
+    color: var(--text-dim);
+    border: 0.5px solid var(--border-mid);
     font-family: var(--font);
     font-size: 14px; font-weight: 500;
-    padding: 12px 28px; border-radius: 50px;
-    cursor: pointer; width: 100%; max-width: 280px;
-    transition: opacity 0.15s;
+    padding: 13px 28px; border-radius: 50px;
+    cursor: pointer; width: 100%; max-width: 300px;
+    transition: color 0.15s, border-color 0.15s;
+    position: relative; z-index: 1;
+    margin-top: 10px;
+  }
+  .btn-secondary:active { color: var(--text); border-color: var(--border-mid); }
+
+  .splash-legal {
+    font-size: 11px; color: rgba(255,255,255,0.2);
+    margin-top: 20px;
+    position: relative; z-index: 1;
   }
 
-  /* ── loading spinner ── */
+  /* ── Loading overlay ── */
   #loading-overlay {
     position: fixed; inset: 0;
-    background: rgba(0,0,0,0.5);
+    background: rgba(0,0,0,0.55);
     display: none; align-items: center; justify-content: center;
-    flex-direction: column; gap: 14px;
+    flex-direction: column; gap: 16px;
     z-index: 90;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
   }
   #loading-overlay.active { display: flex; }
+
+  .loading-card {
+    background: var(--glass);
+    border: 0.5px solid var(--border-mid);
+    border-radius: 20px;
+    padding: 28px 36px;
+    display: flex; flex-direction: column;
+    align-items: center; gap: 14px;
+    box-shadow: var(--shadow);
+  }
+  .loading-logo {
+    width: 48px; height: 48px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px;
+  }
+  .loading-title {
+    font-family: var(--font-display);
+    font-size: 16px; font-weight: 700;
+    letter-spacing: -0.3px;
+  }
   .spinner {
-    width: 40px; height: 40px;
-    border: 3px solid rgba(255,255,255,0.2);
+    width: 28px; height: 28px;
+    border: 2.5px solid rgba(255,255,255,0.12);
     border-top-color: var(--accent);
     border-radius: 50%;
-    animation: spin 0.8s linear infinite;
+    animation: spin 0.75s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-sub {
+    font-size: 12px; color: var(--text-dim);
+    text-align: center;
+  }
 
-  /* ── info panel ── */
+  /* ── Info panel ── */
   #info-panel {
     position: fixed; bottom: 0; left: 0; right: 0;
     background: var(--glass);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    border-top: 0.5px solid rgba(255,255,255,0.12);
-    border-radius: var(--radius) var(--radius) 0 0;
-    padding: 0 20px 20px;
-    padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    backdrop-filter: blur(28px);
+    -webkit-backdrop-filter: blur(28px);
+    border-top: 0.5px solid var(--border-mid);
+    border-radius: 24px 24px 0 0;
+    padding: 0 20px;
+    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
     z-index: 50;
     transform: translateY(100%);
-    transition: transform 0.38s cubic-bezier(0.32,0.72,0,1);
-    max-height: 80vh;
+    transition: transform 0.4s cubic-bezier(0.32, 0.72, 0, 1);
+    max-height: 82vh;
     overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    box-shadow: 0 -8px 40px rgba(0,0,0,0.6);
   }
   #info-panel.open { transform: translateY(0); }
+  #info-panel::-webkit-scrollbar { display: none; }
 
   .panel-handle {
-    width: 36px; height: 4px;
-    background: rgba(255,255,255,0.25);
+    width: 38px; height: 4px;
+    background: rgba(255,255,255,0.2);
     border-radius: 2px;
-    margin: 12px auto 18px;
+    margin: 14px auto 20px;
   }
 
+  .close-btn {
+    position: absolute; top: 18px; right: 18px;
+    width: 32px; height: 32px;
+    background: var(--glass-light);
+    border: 0.5px solid var(--border);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; color: var(--text-dim);
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .close-btn:active { background: var(--glass-mid); }
+
   #panel-category {
-    font-size: 11px; font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 1.2px;
+    font-size: 10.5px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 1.8px;
     color: var(--accent);
-    margin-bottom: 4px;
+    margin-bottom: 5px;
   }
 
   #panel-name {
-    font-size: 24px; font-weight: 700;
-    letter-spacing: -0.5px;
-    line-height: 1.2;
-    margin-bottom: 10px;
+    font-family: var(--font-display);
+    font-size: 26px; font-weight: 700;
+    letter-spacing: -0.5px; line-height: 1.15;
+    margin-bottom: 14px;
+    padding-right: 40px;
   }
 
-  .panel-row {
-    display: flex; align-items: center; gap: 10px;
-    padding: 10px 0;
-    border-bottom: 0.5px solid rgba(255,255,255,0.08);
-    font-size: 14px; color: var(--text-dim);
-  }
-  .panel-row:last-child { border-bottom: none; }
-  .panel-icon { font-size: 16px; width: 20px; text-align: center; flex-shrink: 0; }
-  .panel-val { color: var(--text); }
-
-  .stars { color: var(--accent2); letter-spacing: 1px; }
-
-  .tag-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
-  .tag {
-    font-size: 12px; font-weight: 500;
-    padding: 4px 12px; border-radius: 20px;
-    background: var(--glass-light);
-    border: 0.5px solid rgba(255,255,255,0.15);
-    color: var(--text-dim);
+  .panel-meta-row {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 16px; flex-wrap: wrap;
   }
 
   .dist-badge {
     display: inline-flex; align-items: center; gap: 5px;
     background: var(--accent);
-    font-size: 13px; font-weight: 600;
-    padding: 5px 14px; border-radius: 20px;
-    margin-bottom: 14px;
+    font-size: 12.5px; font-weight: 600;
+    padding: 5px 13px; border-radius: 20px;
+    letter-spacing: -0.1px;
   }
 
-  .close-btn {
-    position: absolute; top: 16px; right: 20px;
-    width: 30px; height: 30px;
+  .tag {
+    font-size: 11.5px; font-weight: 500;
+    padding: 4px 12px; border-radius: 20px;
     background: var(--glass-light);
-    border: 0.5px solid rgba(255,255,255,0.15);
-    border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 14px; color: var(--text-dim);
-    cursor: pointer;
-    line-height: 1;
+    border: 0.5px solid var(--border);
+    color: var(--text-mid);
   }
 
-  /* ── AI Guide (all place types) ── */
+  /* Action buttons row */
+  .panel-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+  .action-btn {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 6px;
+    background: var(--glass-light);
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 13px 8px;
+    cursor: pointer;
+    font-family: var(--font);
+    transition: background 0.15s, border-color 0.15s;
+    text-decoration: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .action-btn:active { background: var(--glass-mid); }
+  .action-btn-icon { font-size: 20px; line-height: 1; }
+  .action-btn-label { font-size: 11px; font-weight: 500; color: var(--text-mid); }
+  .action-btn.primary-action {
+    background: linear-gradient(135deg, var(--blue), #0055cc);
+    border-color: transparent;
+    box-shadow: 0 4px 16px rgba(10,132,255,0.3);
+  }
+  .action-btn.primary-action .action-btn-label { color: #fff; }
+
+  /* Divider */
+  .panel-divider {
+    height: 0.5px;
+    background: var(--border);
+    margin: 6px 0 16px;
+  }
+
+  /* Info rows */
+  .panel-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 11px 0;
+    border-bottom: 0.5px solid var(--border);
+    font-size: 14px; color: var(--text-dim);
+  }
+  .panel-row:last-child { border-bottom: none; }
+  .panel-icon {
+    font-size: 17px; width: 22px;
+    text-align: center; flex-shrink: 0;
+  }
+  .panel-val { color: var(--text); font-weight: 400; }
+
+  .stars { color: var(--accent2); letter-spacing: 2px; font-size: 13px; }
+
+  /* ── AI Guide card ── */
   #heritage-card {
-    margin-top: 16px;
-    background: linear-gradient(135deg, rgba(191,90,242,0.15), rgba(10,132,255,0.12));
-    border: 0.5px solid rgba(191,90,242,0.35);
-    border-radius: 14px;
-    padding: 14px 16px;
+    margin-top: 18px;
+    background: linear-gradient(135deg, rgba(191,90,242,0.10), rgba(10,132,255,0.08));
+    border: 0.5px solid rgba(191,90,242,0.25);
+    border-radius: 16px;
+    padding: 16px 18px;
     display: none;
   }
   #heritage-card.visible { display: block; }
   #heritage-card.food-guide {
-    background: linear-gradient(135deg, rgba(255,59,48,0.15), rgba(255,159,10,0.12));
-    border-color: rgba(255,159,10,0.35);
+    background: linear-gradient(135deg, rgba(255,59,48,0.10), rgba(255,159,10,0.08));
+    border-color: rgba(255,159,10,0.25);
   }
   #heritage-card.hotel-guide {
-    background: linear-gradient(135deg, rgba(10,132,255,0.15), rgba(48,209,88,0.12));
-    border-color: rgba(10,132,255,0.35);
+    background: linear-gradient(135deg, rgba(10,132,255,0.10), rgba(48,209,88,0.08));
+    border-color: rgba(10,132,255,0.25);
   }
   #heritage-card.shop-guide {
-    background: linear-gradient(135deg, rgba(255,55,95,0.15), rgba(255,214,10,0.12));
-    border-color: rgba(255,55,95,0.35);
+    background: linear-gradient(135deg, rgba(255,55,95,0.10), rgba(255,214,10,0.08));
+    border-color: rgba(255,55,95,0.25);
   }
 
   .heritage-header {
     display: flex; align-items: center; gap: 8px;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
   }
   .heritage-badge {
     font-size: 10px; font-weight: 700;
-    letter-spacing: 1px; text-transform: uppercase;
-    color: #bf5af2;
-    background: rgba(191,90,242,0.15);
-    border: 0.5px solid rgba(191,90,242,0.4);
+    letter-spacing: 1.2px; text-transform: uppercase;
+    color: var(--purple);
+    background: rgba(191,90,242,0.12);
+    border: 0.5px solid rgba(191,90,242,0.3);
     border-radius: 20px;
-    padding: 3px 9px;
+    padding: 3px 10px;
   }
   .heritage-powered {
-    font-size: 10px; color: rgba(255,255,255,0.3);
-    margin-left: auto;
+    font-size: 10px; color: rgba(255,255,255,0.25);
+    margin-left: auto; letter-spacing: 0.2px;
   }
 
   #heritage-summary {
-    font-size: 14px; line-height: 1.65;
-    color: rgba(255,255,255,0.85);
-    margin-bottom: 12px;
+    font-size: 13.5px; line-height: 1.7;
+    color: rgba(255,255,255,0.82);
+    margin-bottom: 13px;
+    font-weight: 300;
   }
 
-  .heritage-facts {
-    display: flex; flex-direction: column; gap: 8px;
-  }
+  .heritage-facts { display: flex; flex-direction: column; gap: 8px; }
   .heritage-fact {
     display: flex; gap: 10px; align-items: flex-start;
-    background: rgba(255,255,255,0.04);
+    background: rgba(255,255,255,0.035);
+    border: 0.5px solid rgba(255,255,255,0.07);
     border-radius: 10px;
-    padding: 9px 12px;
+    padding: 10px 13px;
   }
-  .heritage-fact-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
-  .heritage-fact-text { font-size: 13px; color: rgba(255,255,255,0.75); line-height: 1.5; }
-  .heritage-fact-text strong { color: #fff; display: block; font-size: 12px;
-    text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
+  .heritage-fact-icon { font-size: 15px; flex-shrink: 0; margin-top: 1px; }
+  .heritage-fact-text { font-size: 12.5px; color: rgba(255,255,255,0.72); line-height: 1.55; font-weight: 300; }
 
   .heritage-loading {
     display: flex; align-items: center; gap: 10px;
-    font-size: 13px; color: rgba(255,255,255,0.45);
-    padding: 4px 0;
+    font-size: 12.5px; color: rgba(255,255,255,0.38);
+    padding: 2px 0;
   }
   .heritage-spinner {
-    width: 16px; height: 16px; flex-shrink: 0;
-    border: 2px solid rgba(191,90,242,0.25);
-    border-top-color: #bf5af2;
+    width: 15px; height: 15px; flex-shrink: 0;
+    border: 1.5px solid rgba(191,90,242,0.2);
+    border-top-color: var(--purple);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
   }
 
   #heritage-wiki-link {
-    display: none;
-    align-items: center; gap: 5px;
-    margin-top: 12px;
-    font-size: 12px; color: rgba(191,90,242,0.8);
-    text-decoration: none;
+    display: none; align-items: center; gap: 5px;
+    margin-top: 13px;
+    font-size: 12px; color: rgba(191,90,242,0.75);
+    text-decoration: none; font-weight: 500;
+    transition: color 0.15s;
   }
-  #heritage-wiki-link:hover { color: #bf5af2; }
+  #heritage-wiki-link:hover { color: var(--purple); }
 
-  /* ── Directions button ── */
-  #directions-btn {
-    display: none;
-    width: 100%; margin-top: 14px;
-    background: linear-gradient(135deg, #0a84ff, #0066cc);
-    color: #fff; border: none;
-    font-family: var(--font); font-size: 15px; font-weight: 600;
-    padding: 14px; border-radius: 14px;
-    cursor: pointer; align-items: center; justify-content: center; gap: 8px;
-    transition: opacity 0.15s;
-  }
-  #directions-btn.visible { display: flex; }
-  #directions-btn:active { opacity: 0.85; }
-
-  /* ── calibration toast ── */
+  /* ── Calibration toast ── */
   #calib-toast {
-    position: fixed; top: 80px; left: 50%; transform: translateX(-50%);
+    position: fixed; top: 78px; left: 50%; transform: translateX(-50%);
     background: var(--glass);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 0.5px solid rgba(255,255,255,0.15);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 0.5px solid var(--border-mid);
     border-radius: 50px;
     padding: 10px 20px;
-    font-size: 13px; color: var(--text-dim);
-    white-space: nowrap;
-    z-index: 20;
-    opacity: 0;
-    transition: opacity 0.3s;
+    font-size: 12.5px; color: var(--text-mid);
+    white-space: nowrap; z-index: 20;
+    opacity: 0; transition: opacity 0.3s;
     pointer-events: none;
+    box-shadow: var(--shadow);
   }
   #calib-toast.show { opacity: 1; }
 
-  /* ── crosshair ── */
-  #crosshair {
-    position: fixed;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-    width: 24px; height: 24px;
-    pointer-events: none;
-    z-index: 5;
-    opacity: 0.4;
-  }
-  #crosshair::before, #crosshair::after {
-    content: ''; position: absolute; background: #fff;
-  }
-  #crosshair::before { width: 1px; height: 100%; left: 50%; top: 0; }
-  #crosshair::after  { width: 100%; height: 1px; top: 50%; left: 0; }
-
-  /* ── refresh btn ── */
+  /* ── Refresh button ── */
   #refresh-btn {
-    position: fixed; bottom: 96px; left: 50%; transform: translateX(-50%);
+    position: fixed; bottom: 104px; left: 50%; transform: translateX(-50%);
     background: var(--glass);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 0.5px solid rgba(255,255,255,0.2);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 0.5px solid var(--border-mid);
     color: var(--text);
     font-family: var(--font);
-    font-size: 14px; font-weight: 500;
-    padding: 12px 24px; border-radius: 50px;
+    font-size: 13.5px; font-weight: 500;
+    padding: 12px 26px; border-radius: 50px;
     cursor: pointer; z-index: 10;
     display: flex; align-items: center; gap: 8px;
-    transition: opacity 0.15s;
+    transition: opacity 0.15s, transform 0.1s;
     white-space: nowrap;
+    box-shadow: var(--shadow);
   }
-  #refresh-btn:active { opacity: 0.7; }
+  #refresh-btn:active { opacity: 0.7; transform: translateX(-50%) scale(0.97); }
 
-  /* ── filter bar ── */
+  /* ── Filter bar ── */
   #filter-bar {
     position: fixed; bottom: 0; left: 0; right: 0;
-    padding: 10px 14px;
-    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
-    background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, transparent 100%);
-    display: none; /* shown after app starts */
-    flex-direction: row;
-    gap: 8px;
+    padding: 12px 16px;
+    padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+    background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.5) 70%, transparent 100%);
+    display: none;
+    flex-direction: row; gap: 8px;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
@@ -422,19 +626,19 @@
   #filter-bar::-webkit-scrollbar { display: none; }
 
   .filter-chip {
-    display: inline-flex; align-items: center; gap: 5px;
+    display: inline-flex; align-items: center; gap: 6px;
     flex-shrink: 0;
     background: var(--glass);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 0.5px solid rgba(255,255,255,0.15);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 0.5px solid var(--border-mid);
     border-radius: 50px;
-    padding: 7px 13px;
+    padding: 8px 15px;
     font-family: var(--font);
-    font-size: 12px; font-weight: 500;
+    font-size: 12.5px; font-weight: 500;
     color: var(--text-dim);
     cursor: pointer;
-    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    transition: background 0.18s, color 0.18s, border-color 0.18s, transform 0.1s;
     white-space: nowrap;
     -webkit-tap-highlight-color: transparent;
     user-select: none;
@@ -444,113 +648,166 @@
     background: var(--chip-color, var(--accent));
     border-color: transparent;
     color: #fff;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
   }
-  .filter-chip:active { opacity: 0.75; }
+  .filter-chip:active { transform: scale(0.95); }
+
+  /* ── Error toast ── */
+  .error-toast-inner {
+    background: rgba(255,59,48,0.18);
+    border: 0.5px solid rgba(255,59,48,0.35);
+    border-radius: 14px;
+    padding: 13px 18px;
+    font-size: 13px;
+    color: var(--text-mid);
+    line-height: 1.5;
+    max-width: 320px;
+    text-align: center;
+    box-shadow: var(--shadow);
+  }
 </style>
 </head>
 <body>
 
-<!-- camera -->
+<!-- Camera -->
 <video id="video" autoplay playsinline webkit-playsinline muted></video>
 
-<!-- AR overlay canvas -->
+<!-- AR overlay -->
 <canvas id="ar-canvas"></canvas>
 
-<!-- tap targets -->
+<!-- Tap targets -->
 <div id="dot-layer"></div>
 
-<!-- crosshair -->
+<!-- Crosshair -->
 <div id="crosshair"></div>
+<div id="crosshair-dot"></div>
 
 <!-- HUD -->
 <div id="hud">
-  <div id="app-title">AR<span>Scout</span></div>
-  <div id="status-pill">Initializing…</div>
+  <div id="app-brand">
+    <div id="app-logo">📍</div>
+    <div id="app-title">AR<span>Scout</span></div>
+  </div>
+  <div id="hud-right">
+    <div id="gps-indicator">
+      <div id="gps-dot"></div>
+      <span id="gps-label">GPS</span>
+    </div>
+    <div id="status-pill">Starting…</div>
+  </div>
 </div>
 
-<!-- compass -->
+<!-- Compass -->
 <div id="compass-wrap">
-  <svg id="compass-svg" viewBox="0 0 52 52" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <circle cx="26" cy="26" r="25" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
-    <circle cx="26" cy="26" r="25" fill="rgba(10,10,12,0.6)"/>
-    <text x="26" y="11" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.4)" font-family="DM Sans,sans-serif">N</text>
-    <text x="26" y="45" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.4)" font-family="DM Sans,sans-serif">S</text>
-    <text x="9"  y="29" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.4)" font-family="DM Sans,sans-serif">W</text>
-    <text x="44" y="29" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.4)" font-family="DM Sans,sans-serif">E</text>
-    <!-- needle -->
-    <polygon id="compass-needle-n" points="26,8 23,26 29,26" fill="#FF3B30"/>
-    <polygon id="compass-needle-s" points="26,44 23,26 29,26" fill="rgba(255,255,255,0.3)"/>
-    <circle cx="26" cy="26" r="3" fill="#fff"/>
+  <svg id="compass-svg" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="28" cy="28" r="27" fill="rgba(8,8,14,0.72)" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+    <text x="28" y="12"  text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.45)" font-family="DM Sans,sans-serif" font-weight="600">N</text>
+    <text x="28" y="50"  text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.3)"  font-family="DM Sans,sans-serif">S</text>
+    <text x="10" y="31.5" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.3)"  font-family="DM Sans,sans-serif">W</text>
+    <text x="47" y="31.5" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.3)"  font-family="DM Sans,sans-serif">E</text>
+    <polygon id="compass-needle-n" points="28,9 25,28 31,28" fill="#FF3B30" opacity="0.95"/>
+    <polygon id="compass-needle-s" points="28,47 25,28 31,28" fill="rgba(255,255,255,0.25)"/>
+    <circle cx="28" cy="28" r="3.5" fill="#fff" opacity="0.9"/>
   </svg>
 </div>
 
-<!-- count -->
+<!-- Count badge -->
 <div id="count-badge">
   <strong id="place-count">0</strong>
-  nearby places
+  <div id="count-label">nearby places</div>
 </div>
 
-<!-- info panel -->
+<!-- Info panel -->
 <div id="info-panel">
   <div class="panel-handle"></div>
   <div class="close-btn" id="close-panel">✕</div>
   <div id="panel-category"></div>
   <div id="panel-name"></div>
-  <div class="dist-badge"><span>📍</span><span id="panel-dist"></span></div>
-  <div class="tag-row" id="panel-tags"></div>
+
+  <div class="panel-meta-row">
+    <div class="dist-badge"><span>📍</span><span id="panel-dist"></span></div>
+    <div class="tag-row" id="panel-tags" style="display:contents"></div>
+  </div>
+
+  <!-- Action buttons -->
+  <div class="panel-actions" id="panel-actions">
+    <button class="action-btn primary-action" id="directions-btn">
+      <span class="action-btn-icon">🗺</span>
+      <span class="action-btn-label">Directions</span>
+    </button>
+    <button class="action-btn" id="share-btn">
+      <span class="action-btn-icon">↑</span>
+      <span class="action-btn-label">Share</span>
+    </button>
+    <a class="action-btn" id="maps-btn" href="#" target="_blank" rel="noopener">
+      <span class="action-btn-icon">🌐</span>
+      <span class="action-btn-label">Maps</span>
+    </a>
+  </div>
+
+  <div class="panel-divider"></div>
   <div id="panel-rows"></div>
 
-  <!-- AI Guide card — shown only when a Wikipedia extract exists -->
+  <!-- AI Guide -->
   <div id="heritage-card">
     <div class="heritage-header">
       <span class="heritage-badge" id="guide-badge">✦ Place Guide</span>
-      <span class="heritage-powered">Llama 3 via Groq</span>
+      <span class="heritage-powered">Llama 3 · Groq</span>
     </div>
     <div id="heritage-summary"></div>
     <div class="heritage-facts" id="heritage-facts"></div>
     <a id="heritage-wiki-link" href="#" target="_blank" rel="noopener noreferrer" style="display:none">
-      📖 Read full Wikipedia article →
+      📖 Read more →
     </a>
   </div>
-
-  <!-- Directions button -->
-  <button id="directions-btn">🗺 Get Directions</button>
 </div>
 
-<!-- loading -->
+<!-- Loading overlay -->
 <div id="loading-overlay">
-  <div class="spinner"></div>
-  <div style="font-size:14px;color:rgba(255,255,255,0.5)">Loading places…</div>
+  <div class="loading-card">
+    <div class="loading-logo">📍</div>
+    <div class="loading-title">ARScout</div>
+    <div class="spinner"></div>
+    <div class="loading-sub">Discovering nearby places…</div>
+  </div>
 </div>
 
-<!-- splash -->
+<!-- Splash -->
 <div id="splash">
-  <div class="splash-icon">📍</div>
+  <div class="splash-logo">📍</div>
+  <div class="splash-eyebrow">Augmented Reality</div>
   <div class="splash-title">AR<span>Scout</span></div>
-  <div class="splash-sub">Point your camera to discover restaurants, fuel stations, attractions, hotels and more — in augmented reality.</div>
+  <div class="splash-sub">Point your camera to instantly discover restaurants, landmarks, hotels and more around you.</div>
+
+  <div class="splash-features">
+    <div class="splash-feature-pill">🍽 Food & Cafés</div>
+    <div class="splash-feature-pill">🏛 Heritage</div>
+    <div class="splash-feature-pill">🏨 Hotels</div>
+    <div class="splash-feature-pill">⛽ Services</div>
+    <div class="splash-feature-pill">🤖 AI Guides</div>
+  </div>
+
   <button class="btn-primary" id="start-btn">Enable Camera & Location</button>
   <button class="btn-secondary" id="demo-btn">Try Demo Mode</button>
-  <div style="font-size:11px;color:rgba(255,255,255,0.25);margin-top:8px">Requires HTTPS • Camera • GPS • Compass</div>
+  <div class="splash-legal">Requires HTTPS · Camera · GPS · Compass</div>
 </div>
 
-<!-- calibration toast -->
-<div id="calib-toast">Wave phone in a figure-8 to calibrate compass</div>
+<!-- Calibration toast -->
+<div id="calib-toast">🔄 Wave phone in a figure-8 to calibrate compass</div>
 
-<!-- refresh -->
+<!-- Refresh button -->
 <button id="refresh-btn" style="display:none">
-  <span>&#x21BA;</span> Refresh Places
+  <span>↺</span> Refresh Places
 </button>
 
-<!-- filter bar -->
-<div id="filter-bar">
-  <!-- chips are built by JS so colors/ids stay in sync with FILTER_DEFS -->
-</div>
+<!-- Filter bar -->
+<div id="filter-bar"></div>
 
-<!-- debug toggle -->
-<button id="debug-toggle" style="position:fixed;bottom:40px;right:20px;background:rgba(10,10,12,0.8);color:rgba(255,255,255,0.5);border:0.5px solid rgba(255,255,255,0.15);border-radius:50px;font-size:12px;padding:8px 14px;cursor:pointer;z-index:15;font-family:inherit;display:none;">&#128269; Debug</button>
+<!-- Debug toggle -->
+<button id="debug-toggle" style="position:fixed;bottom:40px;right:20px;background:rgba(8,8,14,0.88);color:rgba(255,255,255,0.4);border:0.5px solid rgba(255,255,255,0.12);border-radius:50px;font-size:11.5px;padding:8px 14px;cursor:pointer;z-index:15;font-family:inherit;display:none;">🔍 Debug</button>
 
-<!-- debug panel -->
-<div id="debug-panel" style="display:none;position:fixed;top:80px;left:10px;right:10px;bottom:auto;max-height:55vh;overflow-y:auto;background:rgba(0,0,0,0.92);color:#00ff88;font-family:monospace;font-size:11px;line-height:1.6;padding:10px 12px;border-radius:10px;z-index:80;border:0.5px solid rgba(0,255,136,0.3);white-space:pre-wrap;word-break:break-all;"></div>
+<!-- Debug panel -->
+<div id="debug-panel" style="display:none;position:fixed;top:80px;left:10px;right:10px;bottom:auto;max-height:55vh;overflow-y:auto;background:rgba(0,0,0,0.94);color:#00ff88;font-family:monospace;font-size:11px;line-height:1.6;padding:12px 14px;border-radius:12px;z-index:80;border:0.5px solid rgba(0,255,136,0.25);white-space:pre-wrap;word-break:break-all;"></div>
 
 <script>
 // ─────────────────────────────────────────────
@@ -1285,6 +1542,12 @@ function startGPSWatch(){
       state.lon = lon;
       state.places.forEach(p => { p.dist = haversine(state.lat, state.lon, p.lat, p.lon); });
 
+      // Update GPS HUD indicator
+      const _gpsDot = document.getElementById('gps-dot');
+      const _gpsLbl = document.getElementById('gps-label');
+      if(_gpsDot){ _gpsDot.classList.remove('searching'); _gpsDot.classList.add('locked'); }
+      if(_gpsLbl){ _gpsLbl.textContent = acc < 25 ? 'GPS ✓' : 'GPS ~'+acc+'m'; }
+
       if(!gpsFetched){
         gpsFetched = true;
         fetchPlaces(lat, lon);
@@ -1385,6 +1648,9 @@ async function startReal(){
 
   splash.style.display = 'none';
   statusPill.textContent = 'Requesting camera…';
+  // Set GPS dot to searching state
+  const _gpsDotInit = document.getElementById('gps-dot');
+  if(_gpsDotInit) _gpsDotInit.classList.add('searching');
 
   await Promise.all([
     startCamera(),
@@ -1941,7 +2207,7 @@ function openPanel(place){
     const se = document.createElement('div'); se.style.cssText='font-size:14px;line-height:1.65;color:rgba(255,255,255,0.85);padding:10px 0;'; se.textContent=place.summary||''; rows.appendChild(se);
     if(place.url){ const a=document.createElement('a'); a.href=place.url; a.target='_blank'; a.rel='noopener noreferrer'; a.style.cssText='display:inline-flex;align-items:center;gap:5px;margin-top:6px;font-size:12px;color:#FFD60A;text-decoration:none;'; a.textContent='🔗 Read full story →'; rows.appendChild(a); }
     document.getElementById('heritage-card').classList.remove('visible');
-    document.getElementById('directions-btn').classList.remove('visible');
+    // directions-btn always visible now
     infoPanel.classList.add('open');
     return;
   }
@@ -2041,12 +2307,28 @@ function openPanel(place){
 
   loadHeritageGuide(place);
 
+  // Directions button
   const dirBtn = document.getElementById('directions-btn');
-  dirBtn.classList.add('visible');
   dirBtn.onclick = () => {
-    const url = `https://www.google.com/maps/dir/?api=1&destination=${place.lat},${place.lon}&destination_place_id=&travelmode=walking`;
+    const url = 'https://www.google.com/maps/dir/?api=1&destination=' + place.lat + ',' + place.lon + '&travelmode=walking';
     window.open(url, '_blank', 'noopener,noreferrer');
   };
+
+  // Share button
+  const shareBtn = document.getElementById('share-btn');
+  shareBtn.onclick = async () => {
+    const text = place.name + ' — ' + formatDist(place.dist) + ' away';
+    const url = 'https://www.google.com/maps/search/?api=1&query=' + place.lat + ',' + place.lon;
+    if(navigator.share){
+      try { await navigator.share({ title: place.name, text, url }); } catch(_) {}
+    } else {
+      try { await navigator.clipboard.writeText(text + '\n' + url); showErrorToast('📋 Copied to clipboard'); } catch(_) {}
+    }
+  };
+
+  // Maps link
+  const mapsBtn = document.getElementById('maps-btn');
+  mapsBtn.href = 'https://www.google.com/maps/search/?api=1&query=' + place.lat + ',' + place.lon;
 
   infoPanel.classList.add('open');
 }
