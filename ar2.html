@@ -938,11 +938,15 @@ async function fetchPlaces(lat, lon){
       const elLat = el.lat != null ? el.lat : (el.center && el.center.lat);
       const elLon = el.lon != null ? el.lon : (el.center && el.center.lon);
       if(elLat == null || elLon == null) return null;
+      const t = el.tags || {};
+      // Prefer English name, fall back to any name tag, drop entirely if none
+      const name = t['name:en'] || t['name'] || t['name:ar'] || null;
+      if(!name) return null;
       return {
         id: el.id, osmType: el.type || 'node',
-        name: (el.tags && el.tags.name) || 'Unnamed Place',
+        name,
         lat: elLat, lon: elLon,
-        tags: el.tags || {},
+        tags: t,
         dist: haversine(lat, lon, elLat, elLon),
       };
     });
@@ -951,7 +955,7 @@ async function fetchPlaces(lat, lon){
     const afterRadius = afterNull.filter(function(p){ return p.dist <= MAX_DIST; });
     const sorted      = afterRadius.sort(function(a,b){ return a.dist - b.dist; }).slice(0, 60);
 
-    dbg('afterNull=' + afterNull.length + ' afterRadius=' + afterRadius.length + ' final=' + sorted.length);
+    dbg('Raw=' + data.elements.length + ' named=' + afterNull.length + ' inRadius=' + afterRadius.length + ' final=' + sorted.length);
     state.places = sorted;
     placeCount.textContent = sorted.filter(placePassesFilter).length;
     fetchFailed = false;
