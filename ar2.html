@@ -2106,8 +2106,10 @@ async function loadHeritageGuide(place) {
   }
 
   try {
-    if (guideType === 'food') {
-      // ── Food: call /api/food (Groq web-search + summary) ──────────────
+    if (guideType === 'food' || guideType === 'shop') {
+      // ── Food / Shop: call /api/food (Groq web-search + summary) ──────────────
+      // FIX 3: pass full tags so food.js can build an accurate typeHint
+      // (e.g. tags.shop='supermarket' prevents Choithrams → actress confusion)
       const res = await fetch('/api/food', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2115,6 +2117,7 @@ async function loadHeritageGuide(place) {
       });
       if (!res.ok) throw new Error('food api ' + res.status);
       const data = await res.json();
+      // null summary means NO_INFO was returned — hide card rather than show bad content
       if (!data.summary) { card.classList.remove('visible'); return; }
 
       const parsed = parseGroqResponse(data.summary);
@@ -2122,8 +2125,13 @@ async function loadHeritageGuide(place) {
       renderFacts(factsEl, parsed.facts, guideType);
 
       const zq = encodeURIComponent(place.name + (city ? ' ' + city : ''));
-      wikiLink.href = 'https://www.zomato.com/search?q=' + zq;
-      wikiLink.textContent = '🍽 View on Zomato →';
+      if (guideType === 'shop') {
+        wikiLink.href = 'https://www.google.com/maps/search/?api=1&query=' + zq;
+        wikiLink.textContent = '🗺 View on Google Maps →';
+      } else {
+        wikiLink.href = 'https://www.zomato.com/search?q=' + zq;
+        wikiLink.textContent = '🍽 View on Zomato →';
+      }
       wikiLink.style.display = 'inline-flex';
       return;
     }
