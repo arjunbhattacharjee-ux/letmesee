@@ -597,46 +597,9 @@ const FILTER_DEFS = [
 // Active filter IDs — multi-select; 'all' is the default catch-all
 const state_filters = new Set(['all']);
 
-// Overpass mirrors — ordered by UAE / Middle East reliability.
-// Each entry: [url, perRequestTimeoutMs]
-const OVERPASS_MIRRORS = [
-  // Tier 1 — fastest for Gulf region
-  ['https://overpass.kumi.systems/api/interpreter',       18000],
-  ['https://overpass.private.coffee/api/interpreter',     18000],
-  // Tier 2 — global CDN / proxied
-  ['https://overpass-api.de/api/interpreter',             22000],
-  ['https://overpass.openstreetmap.ru/api/interpreter',   22000],
-  // Tier 3 — CORS proxy fallbacks (last resort)
-  ['https://corsproxy.io/?url=https%3A%2F%2Foverpass-api.de%2Fapi%2Finterpreter', 28000],
-  ['https://api.allorigins.win/raw?url=' + encodeURIComponent('https://overpass-api.de/api/interpreter'), 30000],
-];
-
-// Mirror health cache — penalise recently-failed mirrors
-const _mirrorHealth = {};  // url -> { failCount, lastFailTs }
-
-function _getMirrorPenalty(url) {
-  const h = _mirrorHealth[url];
-  if (!h) return 0;
-  const ageSec = (Date.now() - h.lastFailTs) / 1000;
-  if (ageSec > 120) { delete _mirrorHealth[url]; return 0; } // forget after 2 min
-  return h.failCount; // higher = more penalised
-}
-
-function _recordMirrorFail(url) {
-  if (!_mirrorHealth[url]) _mirrorHealth[url] = { failCount: 0, lastFailTs: 0 };
-  _mirrorHealth[url].failCount = Math.min(_mirrorHealth[url].failCount + 1, 5);
-  _mirrorHealth[url].lastFailTs = Date.now();
-}
-
-function _recordMirrorSuccess(url) {
-  delete _mirrorHealth[url];
-}
-
 // Auto-retry backoff state
 let _retryCount = 0;
 const RETRY_DELAYS_MS = [15000, 30000, 60000]; // 15s → 30s → 60s cap
-
-const INSTANT_FAIL_MS = 1500;
 
 // ─────────────────────────────────────────────
 //  Utilities
@@ -926,95 +889,29 @@ async function fetchPlaces(lat, lon){
     ');out center tags;';
   const body = 'data=' + encodeURIComponent(query);
 
-  // ── Robust mirror fetch ──────────────────────────────────────────────────
-  // Strategy: sort mirrors by health penalty, then fire them in two waves:
-  //   Wave 1 — top 3 mirrors fired immediately (race).
-  //   Wave 2 — remaining mirrors fired after WAVE2_DELAY_MS if wave 1 hasn't resolved.
-  // This avoids hammering all mirrors at once while still having fast fallbacks.
-
-  const WAVE2_DELAY_MS = 3000;
-
-  // Sort mirrors: lowest penalty first; shuffle ties for load distribution
-  const sortedMirrors = [...OVERPASS_MIRRORS].sort((a, b) => {
-    const diff = _getMirrorPenalty(a[0]) - _getMirrorPenalty(b[0]);
-    return diff !== 0 ? diff : (Math.random() - 0.5);
-  });
-
-  const mirrorFetch = ([url, timeoutMs], ctrl) => {
-    const host = url.replace(/^https?:\/\//, '').split('/')[0].split('?')[0];
+  // ── Fetch via /api/osm (server-side proxy — no CORS/allowlist issues) ───
+  let data = null;
+  try {
     const t0 = Date.now();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-    return fetch(url, {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 30000);
+    const res = await fetch('/api/osm', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body,
       signal: ctrl.signal,
-    }).then(async res => {
-      clearTimeout(timer);
-      const elapsed = Date.now() - t0;
-      if (!res.ok) throw new Error('HTTP ' + res.status + ' from ' + host);
-      const text = await res.text();
-      if (text.length < 10) throw new Error('Empty body from ' + host);
-      let parsed;
-      try { parsed = JSON.parse(text); } catch(_) { throw new Error('Bad JSON from ' + host); }
-      if (!parsed || !Array.isArray(parsed.elements)) throw new Error('No elements array from ' + host);
-      _recordMirrorSuccess(url);
-      dbg('✓ ' + host + ' ' + elapsed + 'ms (' + parsed.elements.length + ' el)');
-      return parsed;
-    }).catch(e => {
-      clearTimeout(timer);
-      const elapsed = Date.now() - t0;
-      const tag = e.name === 'AbortError' ? 'TIMEOUT' : elapsed < INSTANT_FAIL_MS ? 'BLOCKED' : 'ERR';
-      _recordMirrorFail(url);
-      dbg('✗ ' + host + ' [' + tag + ' ' + elapsed + 'ms]: ' + (e.message || e));
-      throw e;
     });
-  };
-
-  // Build controllers lazily
-  const ctrls = sortedMirrors.map(() => new AbortController());
-  const abortAll = () => ctrls.forEach(c => { try { c.abort(); } catch(_){} });
-
-  let data = null;
-  try {
-    // Wave 1: fire top 3 mirrors immediately; Wave 2: remaining mirrors after WAVE2_DELAY_MS.
-    // Uses a manual promise to avoid AggregateError (not available on older iOS Safari).
-    data = await new Promise((resolve, reject) => {
-      let settled = false;
-      let rejectedCount = 0;
-      const totalCount = sortedMirrors.length;
-
-      const settle = (val) => {
-        if (!settled) { settled = true; abortAll(); resolve(val); }
-      };
-      const onReject = () => {
-        rejectedCount++;
-        if (rejectedCount >= totalCount) {
-          abortAll();
-          reject(new Error('All mirrors failed'));
-        }
-      };
-
-      // Wave 1: top 3
-      sortedMirrors.slice(0, 3).forEach((m, i) => {
-        mirrorFetch(m, ctrls[i]).then(settle, onReject);
-      });
-
-      // Wave 2: rest, fired after delay if not yet resolved
-      setTimeout(() => {
-        if (settled) return;
-        dbg('Wave 2 fired (' + sortedMirrors.slice(3).length + ' more mirrors)');
-        sortedMirrors.slice(3).forEach((m, i) => {
-          mirrorFetch(m, ctrls[3 + i]).then(settle, onReject);
-        });
-      }, WAVE2_DELAY_MS);
-    });
-
+    clearTimeout(timer);
+    const elapsed = Date.now() - t0;
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const text = await res.text();
+    data = JSON.parse(text);
+    dbg('✓ /api/osm ' + elapsed + 'ms (' + (data.elements?.length ?? '?') + ' el)');
   } catch(err) {
-    abortAll();
-    dbg('All mirrors rejected: ' + err.message);
+    dbg('✗ /api/osm: ' + err.message);
   }
 
+  // NOTE: failure path uses `finally` below — no `return` here so fetchInFlight always resets
   try {
     if (!data || !Array.isArray(data.elements)) {
       const delay = RETRY_DELAYS_MS[Math.min(_retryCount, RETRY_DELAYS_MS.length - 1)];
@@ -1031,8 +928,8 @@ async function fetchPlaces(lat, lon){
           fetchPlaces(state.lat, state.lon);
         }
       }, delay);
-      return;
-    }
+      // ← NO return here; fall through to finally so fetchInFlight resets
+    } else {
 
     _retryCount = 0;
 
@@ -1077,6 +974,7 @@ async function fetchPlaces(lat, lon){
 
     if (!state.demoMode) fetchBazingaPlaces(lat, lon).catch(e => dbg('Bazinga: ' + e.message));
 
+    } // end else (success path)
   } finally {
     clearTimeout(_safetyTimer);
     fetchInFlight = false;
