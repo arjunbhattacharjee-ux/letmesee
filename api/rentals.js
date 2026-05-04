@@ -127,7 +127,7 @@ For each valid listing:
 - type: "apartment" | "villa" | "studio" | "townhouse" | "flat"
 - area_sqft: number or null
 - building: tower/building name or null
-- Estimate lat/lon within 0.025 degrees of ${lat.toFixed(4)}, ${lon.toFixed(4)}
+- Give EACH listing a DISTINCT lat/lon within 0.02 degrees of ${lat.toFixed(4)}, ${lon.toFixed(4)} — spread them out, do NOT give all listings the same coordinates
 - url: listing URL from the results above, or null
 
 Return ONLY a raw JSON array (no markdown, no backticks):
@@ -177,9 +177,18 @@ If NO valid listings are found for ${locationLabel}, return an empty array: []`;
     _c.includes('usa')||_c.includes('united states')                    ? 'USD' :
     'USD';
 
+  // Spread coords server-side in case Llama placed all listings at the same point
+  const SPREAD = 0.0012;
+  const firstLat = listings[0]?.lat;
+  const firstLon = listings[0]?.lon;
   const clean = listings
     .filter(l => l && l.name && l.lat && l.lon)
-    .map((l,i) => ({
+    .map((l,i) => {
+      const allSame = listings.every(x => x.lat === firstLat && x.lon === firstLon);
+      const angle = (i / listings.length) * 2 * Math.PI;
+      const jLat = allSame ? Math.cos(angle) * SPREAD * (0.6 + i * 0.2) : 0;
+      const jLon = allSame ? Math.sin(angle) * SPREAD * (0.6 + i * 0.2) : 0;
+      return ({
       id:         'rent_'+i,
       isRental:   true,
       name:       (l.name||'Rental').slice(0,40),
@@ -190,10 +199,11 @@ If NO valid listings are found for ${locationLabel}, return an empty array: []`;
       area_sqft:  l.area_sqft ? Math.round(parseFloat(l.area_sqft)) : null,
       building:   l.building ? l.building.slice(0,50) : null,
       summary:    (l.summary||'').slice(0,300),
-      lat:        Math.max(lat-0.025, Math.min(lat+0.025, parseFloat(l.lat))),
-      lon:        Math.max(lon-0.025, Math.min(lon+0.025, parseFloat(l.lon))),
+      lat:        Math.max(lat-0.025, Math.min(lat+0.025, parseFloat(l.lat)+jLat)),
+      lon:        Math.max(lon-0.025, Math.min(lon+0.025, parseFloat(l.lon)+jLon)),
       url:        l.url && l.url.startsWith('http') ? l.url : null,
-    }))
+    });
+  })
     .slice(0, 6);
 
   return new Response(JSON.stringify({listings: clean}), {
