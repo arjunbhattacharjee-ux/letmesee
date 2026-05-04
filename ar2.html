@@ -729,7 +729,10 @@
       <span class="action-btn-icon">↑</span>
       <span class="action-btn-label">Share</span>
     </button>
-
+    <a class="action-btn" id="maps-btn" href="#" target="_blank" rel="noopener">
+      <span class="action-btn-icon">🌐</span>
+      <span class="action-btn-label">Maps</span>
+    </a>
   </div>
 
   <div class="panel-divider"></div>
@@ -802,6 +805,7 @@ const state = {
   headingReceived: false,
   places: [],
   bazingaPlaces: [],
+  rentalPlaces: [],
   demoMode: false,
   ready: false,
   permOrientation: false,
@@ -827,6 +831,7 @@ const FILTER_DEFS = [
     amenityMatch: ['atm','bank','fuel','pharmacy','supermarket','marketplace'],
     shopMatch:    ['supermarket','convenience','general','pharmacy','mall'] },
   { id:'bazinga',   label:'Bazinga',      emoji:'⚡', color:'#FFD60A', isBazinga: true },
+  { id:'rentals',    label:'Rentals',      emoji:'🏠', color:'#34C759', isRental: true  },
 ];
 
 // Active filter IDs — multi-select; 'all' is the default catch-all
@@ -941,7 +946,8 @@ function getDotColor(tags){
 
 function placePassesFilter(place){
   if(place.isBazinga) return state_filters.has('all') || state_filters.has('bazinga');
-  if(state_filters.size === 1 && state_filters.has('bazinga')) return false;
+  if(place.isRental)  return state_filters.has('all') || state_filters.has('rentals');
+  if(state_filters.size === 1 && (state_filters.has('bazinga') || state_filters.has('rentals'))) return false;
   if(state_filters.has('all')) return true;
   const tags = place.tags;
   for(const fid of state_filters){
@@ -999,14 +1005,12 @@ function handleFilterTap(fid){
   filterBar.querySelectorAll('.filter-chip').forEach(chip => {
     chip.classList.toggle('active', state_filters.has(chip.dataset.fid));
   });
-  // When only bazinga filter is active, count bazinga spots; otherwise OSM + bazinga
-  const osmVisible = state_filters.has('bazinga') && state_filters.size === 1
-    ? 0
-    : state.places.filter(placePassesFilter).length;
-  const bzVisible = state_filters.has('all') || state_filters.has('bazinga')
-    ? state.bazingaPlaces.length
-    : 0;
-  placeCount.textContent = osmVisible + bzVisible;
+  const _onlyBz   = state_filters.has('bazinga') && state_filters.size === 1;
+  const _onlyRent = state_filters.has('rentals')  && state_filters.size === 1;
+  const _osmVis   = (_onlyBz || _onlyRent) ? 0 : state.places.filter(placePassesFilter).length;
+  const _bzVis    = state_filters.has('all') || state_filters.has('bazinga') ? state.bazingaPlaces.length : 0;
+  const _rentVis  = state_filters.has('all') || state_filters.has('rentals') ? (state.rentalPlaces||[]).length : 0;
+  placeCount.textContent = _osmVis + _bzVis + _rentVis;
 }
 
 function showFilterBar(){
@@ -1098,7 +1102,7 @@ async function fetchPlaces(lat, lon){
       const parsed = JSON.parse(cached);
       if(Array.isArray(parsed) && parsed.length > 0){
         state.places = parsed.map(p => ({ ...p, dist: haversine(lat, lon, p.lat, p.lon) }));
-        placeCount.textContent = state.places.filter(placePassesFilter).length;
+        placeCount.textContent = state.places.filter(placePassesFilter).length + (state.bazingaPlaces||[]).length + (state.rentalPlaces||[]).length;
         statusPill.textContent = state.places.length + ' places nearby (cached)';
         dbg('Cache hit — ' + state.places.length + ' places, age=' + Math.round(ageSec) + 's moved=' + Math.round(movedM) + 'm');
         fetchFailed = false;
@@ -1204,7 +1208,7 @@ async function fetchPlaces(lat, lon){
 
     dbg('Raw=' + data.elements.length + ' named=' + afterNull.length + ' inRadius=' + afterRadius.length + ' final=' + sorted.length);
     state.places = sorted;
-    placeCount.textContent = sorted.filter(placePassesFilter).length;
+    placeCount.textContent = sorted.filter(placePassesFilter).length + (state.bazingaPlaces||[]).length + (state.rentalPlaces||[]).length;
     fetchFailed = false;
     currentRadius = MAX_DIST;
 
@@ -1224,6 +1228,7 @@ async function fetchPlaces(lat, lon){
     }
 
     if (!state.demoMode) fetchBazingaPlaces(lat, lon).catch(e => dbg('Bazinga: ' + e.message));
+    if (!state.demoMode) fetchRentalPlaces(lat, lon).catch(e => dbg('Rentals: ' + e.message));
 
     } // end else (success path)
   } finally {
@@ -1740,7 +1745,7 @@ function renderFrame(){
   const bandH = (H() * 0.60) / BANDS;
   const topY  = H() * 0.20;
 
-  const allRenderPlaces = [...state.places, ...state.bazingaPlaces];
+  const allRenderPlaces = [...state.places, ...state.bazingaPlaces, ...state.rentalPlaces];
   for(let rank = 0; rank < allRenderPlaces.length; rank++){
     const place = allRenderPlaces[rank];
     if(!state.lat) break;
@@ -1775,18 +1780,20 @@ function renderFrame(){
     const r = baseSize * pulse;
 
     const isBazinga = !!place.isBazinga;
-    const emoji = isBazinga ? '⚡' : getTypeEmoji(place.tags);
-    const [dotR, dotG, dotB] = isBazinga ? [255, 214, 10] : getDotColor(place.tags);
-    const iconSize = isBazinga ? 32 + distFactor * 6 : 28 + distFactor * 8;
+    const isRental  = !!place.isRental;
+    const emoji = isRental ? '🏠' : isBazinga ? '⚡' : getTypeEmoji(place.tags);
+    const [dotR, dotG, dotB] = isRental ? [52, 199, 89] : isBazinga ? [255, 214, 10] : getDotColor(place.tags);
+    const iconSize = (isBazinga || isRental) ? 32 + distFactor * 6 : 28 + distFactor * 8;
     const bubbleR  = iconSize / 2 + 4;
-    const ep = isBazinga ? pulse * (1 + 0.18 * Math.sin(now / 400)) : pulse;
+    const ep = isBazinga ? pulse * (1 + 0.18 * Math.sin(now / 400)) : isRental ? pulse * (1 + 0.10 * Math.sin(now / 600)) : pulse;
 
     // Glow
-    const glow = ctx.createRadialGradient(x, y, bubbleR * 0.5, x, y, bubbleR * (isBazinga ? 2.2 : 1.6));
-    glow.addColorStop(0, `rgba(${dotR},${dotG},${dotB},${alpha * (isBazinga ? 0.55 : 0.35)})`);
+    const glowMult = (isBazinga || isRental) ? 2.2 : 1.6;
+    const glow = ctx.createRadialGradient(x, y, bubbleR * 0.5, x, y, bubbleR * glowMult);
+    glow.addColorStop(0, `rgba(${dotR},${dotG},${dotB},${alpha * ((isBazinga || isRental) ? 0.55 : 0.35)})`);
     glow.addColorStop(1, `rgba(${dotR},${dotG},${dotB},0)`);
     ctx.beginPath();
-    ctx.arc(x, y, bubbleR * (isBazinga ? 2.2 : 1.6), 0, Math.PI * 2);
+    ctx.arc(x, y, bubbleR * glowMult, 0, Math.PI * 2);
     ctx.fillStyle = glow; ctx.fill();
 
     // Bubble fill
@@ -1797,8 +1804,8 @@ function renderFrame(){
     // Bubble border
     ctx.beginPath();
     ctx.arc(x, y, bubbleR * ep, 0, Math.PI * 2);
-    ctx.strokeStyle = isBazinga ? `rgba(255,255,255,${edgeFade * 0.9})` : `rgba(255,255,255,${edgeFade * 0.55})`;
-    ctx.lineWidth = isBazinga ? 2 : 1.5; ctx.stroke();
+    ctx.strokeStyle = (isBazinga || isRental) ? `rgba(255,255,255,${edgeFade * 0.9})` : `rgba(255,255,255,${edgeFade * 0.55})`;
+    ctx.lineWidth = (isBazinga || isRental) ? 2 : 1.5; ctx.stroke();
 
     // Emoji
     ctx.font = `${iconSize * ep}px sans-serif`;
@@ -1809,22 +1816,27 @@ function renderFrame(){
 
     // Name label
     {
-      ctx.font = isBazinga ? `700 12px 'DM Sans', sans-serif` : `600 12px 'DM Sans', sans-serif`;
+      ctx.font = (isBazinga || isRental) ? `700 12px 'DM Sans', sans-serif` : `600 12px 'DM Sans', sans-serif`;
       ctx.textAlign = 'center';
       const nameW = ctx.measureText(place.name).width + 16;
       const nameY = y - bubbleR * ep - 10;
       ctx.beginPath();
       ctx.roundRect(x - nameW/2, nameY - 14, nameW, 18, 9);
-      ctx.fillStyle = isBazinga ? `rgba(30,20,0,${edgeFade * 0.85})` : `rgba(0,0,0,${edgeFade * 0.72})`; ctx.fill();
-      ctx.fillStyle = isBazinga ? `rgba(255,214,10,${edgeFade * alpha})` : `rgba(255,255,255,${edgeFade * alpha})`;
+      ctx.fillStyle = isBazinga ? `rgba(30,20,0,${edgeFade*0.85})` : isRental ? `rgba(0,30,10,${edgeFade*0.85})` : `rgba(0,0,0,${edgeFade*0.72})`; ctx.fill();
+      ctx.fillStyle = isBazinga ? `rgba(255,214,10,${edgeFade*alpha})` : isRental ? `rgba(52,199,89,${edgeFade*alpha})` : `rgba(255,255,255,${edgeFade*alpha})`;
       ctx.fillText(place.name, x, nameY);
     }
 
-    // Distance
+    // Distance / price label
     {
       ctx.font = `500 10px 'DM Sans', sans-serif`; ctx.textAlign = 'center';
-      ctx.fillStyle = `rgba(255,255,255,${edgeFade * alpha * 0.8})`;
-      ctx.fillText(formatDist(place.dist), x, y + bubbleR * ep + 14);
+      if(isRental && place.price){
+        ctx.fillStyle = `rgba(52,199,89,${edgeFade*alpha})`;
+        ctx.fillText(place.currency+' '+place.price.toLocaleString()+'/mo', x, y + bubbleR * ep + 14);
+      } else {
+        ctx.fillStyle = `rgba(255,255,255,${edgeFade * alpha * 0.8})`;
+        ctx.fillText(formatDist(place.dist), x, y + bubbleR * ep + 14);
+      }
     }
 
     frameDots.push({ place, x, y, r: bubbleR * ep + 18 });
@@ -2187,6 +2199,38 @@ async function loadHeritageGuide(place) {
 function openPanel(place){
   const tags = place.tags;
 
+  if(place.isRental){
+    document.getElementById('panel-category').textContent = '🏠 RENTAL · ' + (place.type||'APARTMENT').toUpperCase();
+    document.getElementById('panel-name').textContent = place.name;
+    document.getElementById('panel-dist').textContent = formatDist(place.dist) + ' away';
+    const tagRow = document.getElementById('panel-tags');
+    tagRow.innerHTML = '';
+    const addTag = (txt, color) => {
+      const s = document.createElement('span'); s.className = 'tag';
+      if(color) s.style.cssText = `color:${color};border-color:${color}44;`;
+      s.textContent = txt; tagRow.appendChild(s);
+    };
+    if(place.price)             addTag(place.currency + ' ' + place.price.toLocaleString() + '/mo', '#34C759');
+    if(place.bedrooms != null)  addTag(place.bedrooms === 0 ? 'Studio' : place.bedrooms + ' BR');
+    if(place.area_sqft)         addTag(place.area_sqft.toLocaleString() + ' sqft');
+    if(place.building)          addTag(place.building);
+    const rows = document.getElementById('panel-rows'); rows.innerHTML = '';
+    if(place.summary){
+      const se = document.createElement('div');
+      se.style.cssText = 'font-size:14px;line-height:1.65;color:rgba(255,255,255,0.85);padding:10px 0;';
+      se.textContent = place.summary; rows.appendChild(se);
+    }
+    if(place.url){
+      const a = document.createElement('a'); a.href = place.url; a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.style.cssText = 'display:inline-flex;align-items:center;gap:5px;margin-top:6px;font-size:12px;color:#34C759;text-decoration:none;';
+      a.textContent = '🔗 View listing →'; rows.appendChild(a);
+    }
+    document.getElementById('heritage-card').classList.remove('visible');
+    infoPanel.classList.add('open');
+    return;
+  }
+
   if(place.isBazinga){
     document.getElementById('panel-category').textContent = '⚡ BAZINGA · ' + (place.category||'News').toUpperCase();
     document.getElementById('panel-name').textContent = place.headline || place.name;
@@ -2305,7 +2349,7 @@ function openPanel(place){
 
   // Maps link
   const mapsBtn = document.getElementById('maps-btn');
-  if(mapsBtn) mapsBtn.href = 'https://www.google.com/maps/search/?api=1&query=' + place.lat + ',' + place.lon;
+  mapsBtn.href = 'https://www.google.com/maps/search/?api=1&query=' + place.lat + ',' + place.lon;
 
   infoPanel.classList.add('open');
 }
@@ -2325,6 +2369,36 @@ infoPanel.addEventListener('touchend', e => {
 // ─────────────────────────────────────────────
 document.getElementById('start-btn').addEventListener('click', startReal);
 document.getElementById('demo-btn').addEventListener('click', startDemo);
+
+async function fetchRentalPlaces(lat, lon) {
+  try {
+    const city    = typeof currentCity    !== 'undefined' ? currentCity    : null;
+    const country = typeof currentCountry !== 'undefined' ? currentCountry : null;
+    dbg('Rentals fetch: ' + (city || lat.toFixed(3) + ',' + lon.toFixed(3)));
+    const res = await fetch('/api/rentals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lat, lon, city, country }),
+    });
+    if (!res.ok) { dbg('Rentals API error: ' + res.status); return; }
+    const data = await res.json();
+    if (!data.listings || data.listings.length === 0) { dbg('Rentals: 0 listings returned'); return; }
+    state.rentalPlaces = data.listings.map((l, i) => ({
+      ...l,
+      id:       l.id || 'rent_' + i,
+      isRental: true,
+      tags:     {},
+      dist:     haversine(lat, lon, l.lat, l.lon),
+    }));
+    dbg('Rentals loaded: ' + state.rentalPlaces.length + ' listings');
+    const _onlyBz   = state_filters.has('bazinga') && state_filters.size === 1;
+    const _onlyRent = state_filters.has('rentals')  && state_filters.size === 1;
+    const _osmVis   = (_onlyBz || _onlyRent) ? 0 : state.places.filter(placePassesFilter).length;
+    const _bzVis    = state_filters.has('all') || state_filters.has('bazinga') ? state.bazingaPlaces.length : 0;
+    const _rentVis  = state_filters.has('all') || state_filters.has('rentals') ? state.rentalPlaces.length  : 0;
+    placeCount.textContent = _osmVis + _bzVis + _rentVis;
+  } catch(e) { dbg('fetchRentalPlaces: ' + e.message); }
+}
 
 async function fetchBazingaPlaces(lat, lon) {
   try {
