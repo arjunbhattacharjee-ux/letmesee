@@ -2383,11 +2383,21 @@ async function fetchRentalPlaces(lat, lon) {
     if(!res.ok){ dbg('Rentals API error: '+res.status); return; }
     const data = await res.json();
     if(!data.listings||!data.listings.length){ dbg('Rentals: 0 listings'); return; }
-    state.rentalPlaces = data.listings.map((l,i) => ({
-      ...l, id: l.id||'rent_'+i, isRental: true, tags: {},
-      dist: haversine(lat, lon, l.lat, l.lon),
-    }));
+    // Spread rental coords if Llama placed them all at the same point
+    const SPREAD = 0.0015; // ~150m spread radius
+    state.rentalPlaces = data.listings.map((l,i) => {
+      const angle = (i / data.listings.length) * 2 * Math.PI;
+      const jitterLat = l.lat === data.listings[0].lat ? Math.cos(angle) * SPREAD * (0.5 + i*0.3) : 0;
+      const jitterLon = l.lon === data.listings[0].lon ? Math.sin(angle) * SPREAD * (0.5 + i*0.3) : 0;
+      return {
+        ...l, id: l.id||'rent_'+i, isRental: true, tags: {},
+        lat: l.lat + jitterLat,
+        lon: l.lon + jitterLon,
+        dist: haversine(lat, lon, l.lat + jitterLat, l.lon + jitterLon),
+      };
+    });
     dbg('Rentals loaded: ' + state.rentalPlaces.length);
+    state.rentalPlaces.forEach((r,i) => dbg('RENT['+i+'] lat='+r.lat.toFixed(4)+' lon='+r.lon.toFixed(4)+' dist='+Math.round(r.dist)+'m "'+r.name.slice(0,20)+'"'));
     const _onlyBz=state_filters.has('bazinga')&&state_filters.size===1;
     const _onlyRent=state_filters.has('rentals')&&state_filters.size===1;
     placeCount.textContent =
