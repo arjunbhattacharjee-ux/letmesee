@@ -164,6 +164,19 @@ If NO valid listings are found for ${locationLabel}, return an empty array: []`;
     return new Response(JSON.stringify({listings:[]}),{status:200,headers:{'Content-Type':'application/json'}});
   }
 
+  // Derive a sensible fallback currency from the country
+  const _c = [country, city, suburb].join(' ').toLowerCase();
+  const defaultCurrency =
+    _c.includes('uae')||_c.includes('dubai')||_c.includes('abu dhabi') ? 'AED' :
+    _c.includes('india')                                                ? 'INR' :
+    _c.includes('uk')||_c.includes('united kingdom')||_c.includes('london') ? 'GBP' :
+    _c.includes('australia')                                            ? 'AUD' :
+    _c.includes('singapore')                                            ? 'SGD' :
+    _c.includes('saudi')                                                ? 'SAR' :
+    _c.includes('qatar')                                                ? 'QAR' :
+    _c.includes('usa')||_c.includes('united states')                    ? 'USD' :
+    'USD';
+
   const clean = listings
     .filter(l => l && l.name && l.lat && l.lon)
     .map((l,i) => ({
@@ -172,7 +185,7 @@ If NO valid listings are found for ${locationLabel}, return an empty array: []`;
       name:       (l.name||'Rental').slice(0,40),
       bedrooms:   Number.isInteger(l.bedrooms) ? l.bedrooms : (l.bedrooms!=null ? parseInt(l.bedrooms)||null : null),
       price:      l.price ? Math.round(parseFloat(l.price)) : null,
-      currency:   (l.currency||'AED').slice(0,5),
+      currency:   (l.currency || defaultCurrency).slice(0,5),
       type:       (l.type||'apartment').slice(0,20),
       area_sqft:  l.area_sqft ? Math.round(parseFloat(l.area_sqft)) : null,
       building:   l.building ? l.building.slice(0,50) : null,
