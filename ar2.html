@@ -729,10 +729,7 @@
       <span class="action-btn-icon">↑</span>
       <span class="action-btn-label">Share</span>
     </button>
-    <a class="action-btn" id="maps-btn" href="#" target="_blank" rel="noopener">
-      <span class="action-btn-icon">🌐</span>
-      <span class="action-btn-label">Maps</span>
-    </a>
+
   </div>
 
   <div class="panel-divider"></div>
@@ -1002,8 +999,14 @@ function handleFilterTap(fid){
   filterBar.querySelectorAll('.filter-chip').forEach(chip => {
     chip.classList.toggle('active', state_filters.has(chip.dataset.fid));
   });
-  const visible = state.places.filter(placePassesFilter).length;
-  placeCount.textContent = visible;
+  // When only bazinga filter is active, count bazinga spots; otherwise OSM + bazinga
+  const osmVisible = state_filters.has('bazinga') && state_filters.size === 1
+    ? 0
+    : state.places.filter(placePassesFilter).length;
+  const bzVisible = state_filters.has('all') || state_filters.has('bazinga')
+    ? state.bazingaPlaces.length
+    : 0;
+  placeCount.textContent = osmVisible + bzVisible;
 }
 
 function showFilterBar(){
@@ -2188,19 +2191,8 @@ function openPanel(place){
     document.getElementById('panel-category').textContent = '⚡ BAZINGA · ' + (place.category||'News').toUpperCase();
     document.getElementById('panel-name').textContent = place.headline || place.name;
     document.getElementById('panel-dist').textContent = formatDist(place.dist) + ' away';
-
-    // Tags row — category chip + date chip
-    const tagRow = document.getElementById('panel-tags');
-    tagRow.innerHTML = '';
-    const cs = document.createElement('span'); cs.className='tag'; cs.textContent=place.category||'News'; tagRow.appendChild(cs);
-    if(place.date_label){
-      const ds = document.createElement('span');
-      ds.className = 'tag';
-      ds.style.cssText = 'color:rgba(255,214,10,0.9);border-color:rgba(255,214,10,0.3);';
-      ds.textContent = '🗓 ' + place.date_label;
-      tagRow.appendChild(ds);
-    }
-
+    document.getElementById('panel-tags').innerHTML = '';
+    const cs = document.createElement('span'); cs.className='tag'; cs.textContent=place.category||'News'; document.getElementById('panel-tags').appendChild(cs);
     const rows = document.getElementById('panel-rows'); rows.innerHTML='';
     const se = document.createElement('div'); se.style.cssText='font-size:14px;line-height:1.65;color:rgba(255,255,255,0.85);padding:10px 0;'; se.textContent=place.summary||''; rows.appendChild(se);
     if(place.url){ const a=document.createElement('a'); a.href=place.url; a.target='_blank'; a.rel='noopener noreferrer'; a.style.cssText='display:inline-flex;align-items:center;gap:5px;margin-top:6px;font-size:12px;color:#FFD60A;text-decoration:none;'; a.textContent='🔗 Read full story →'; rows.appendChild(a); }
@@ -2313,7 +2305,7 @@ function openPanel(place){
 
   // Maps link
   const mapsBtn = document.getElementById('maps-btn');
-  mapsBtn.href = 'https://www.google.com/maps/search/?api=1&query=' + place.lat + ',' + place.lon;
+  if(mapsBtn) mapsBtn.href = 'https://www.google.com/maps/search/?api=1&query=' + place.lat + ',' + place.lon;
 
   infoPanel.classList.add('open');
 }
@@ -2348,8 +2340,6 @@ async function fetchBazingaPlaces(lat, lon) {
       headline: s.headline || s.name,
       summary: s.summary || '',
       category: s.category || 'News',
-      date: s.date || null,
-      date_label: s.date_label || null,
       url: s.url || null,
       lat: s.lat, lon: s.lon,
       dist: haversine(lat, lon, s.lat, s.lon),
