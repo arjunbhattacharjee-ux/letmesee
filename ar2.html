@@ -227,7 +227,7 @@
   .splash-inner {
     position: relative; z-index: 1;
     width: 100%; max-width: 420px;
-    padding: calc(env(safe-area-inset-top,20px) + 40px) 28px calc(env(safe-area-inset-bottom,20px) + 48px);
+    padding: calc(env(safe-area-inset-top,20px) + 28px) 28px calc(env(safe-area-inset-bottom,20px) + 40px);
     display: flex; flex-direction: column;
     align-items: center;
     min-height: 100vh;
@@ -243,7 +243,7 @@
     font-size: 11.5px; font-weight: 500;
     color: rgba(255,255,255,0.45);
     letter-spacing: 0.2px;
-    margin-bottom: 36px;
+    margin-bottom: 24px;
     animation: fadeUp 0.6s ease both;
   }
   .splash-top-badge-dot {
@@ -282,7 +282,7 @@
     color: rgba(255,255,255,0.42);
     letter-spacing: -0.2px;
     text-align: center;
-    margin-bottom: 48px;
+    margin-bottom: 28px;
     line-height: 1.55;
     max-width: 280px;
     animation: fadeUp 0.6s 0.14s ease both;
@@ -291,8 +291,8 @@
   /* — visual mockup strip — */
   .splash-phone-strip {
     width: 100%; max-width: 340px;
-    margin-bottom: 44px;
-    animation: fadeUp 0.6s 0.18s ease both;
+    margin-bottom: 32px;
+    animation: fadeUp 0.6s 0.36s ease both;
     position: relative;
   }
   .splash-phone-frame {
@@ -407,8 +407,8 @@
   .splash-uses {
     display: flex; flex-wrap: wrap; gap: 8px;
     justify-content: center;
-    margin-bottom: 40px;
-    animation: fadeUp 0.6s 0.22s ease both;
+    margin-bottom: 32px;
+    animation: fadeUp 0.6s 0.40s ease both;
   }
   .use-pill {
     display: inline-flex; align-items: center; gap: 6px;
@@ -425,7 +425,7 @@
   .splash-steps {
     width: 100%;
     margin-bottom: 40px;
-    animation: fadeUp 0.6s 0.28s ease both;
+    animation: fadeUp 0.6s 0.44s ease both;
   }
   .steps-label {
     font-size: 10px; font-weight: 600;
@@ -474,8 +474,8 @@
   .splash-cta {
     width: 100%;
     display: flex; flex-direction: column; align-items: center; gap: 10px;
-    animation: fadeUp 0.6s 0.34s ease both;
-    margin-bottom: 24px;
+    animation: fadeUp 0.6s 0.22s ease both;
+    margin-bottom: 16px;
   }
   .btn-primary {
     width: 100%;
@@ -510,7 +510,17 @@
     font-size: 11px; color: rgba(255,255,255,0.16);
     text-align: center;
     line-height: 1.6;
-    animation: fadeUp 0.6s 0.38s ease both;
+    animation: fadeUp 0.6s 0.28s ease both;
+    margin-bottom: 32px;
+  }
+
+  /* — section divider — */
+  .splash-divider {
+    width: 100%;
+    height: 0.5px;
+    background: rgba(255,255,255,0.07);
+    margin-bottom: 32px;
+    animation: fadeUp 0.6s 0.32s ease both;
   }
 
   @keyframes fadeUp {
@@ -974,6 +984,19 @@
     <div class="splash-wordmark">Lenz<span class="accent-dot"></span></div>
     <div class="splash-tagline">Your phone's camera becomes a live guide to everything around you</div>
 
+    <!-- CTA — above fold, always visible -->
+    <div class="splash-cta">
+      <button class="btn-primary" id="start-btn">
+        <span>📍</span> Start Exploring
+      </button>
+      <button class="btn-secondary" id="demo-btn">Try Without Camera</button>
+    </div>
+
+    <div class="splash-legal">Camera · GPS · Compass · No account needed</div>
+
+    <!-- Divider -->
+    <div class="splash-divider"></div>
+
     <!-- Simulated AR preview -->
     <div class="splash-phone-strip">
       <div class="splash-phone-frame">
@@ -1058,16 +1081,6 @@
         </div>
       </div>
     </div>
-
-    <!-- CTA -->
-    <div class="splash-cta">
-      <button class="btn-primary" id="start-btn">
-        <span>📍</span> Start Exploring
-      </button>
-      <button class="btn-secondary" id="demo-btn">Try Without Camera</button>
-    </div>
-
-    <div class="splash-legal">Requires HTTPS · Camera · GPS · Compass<br>No account needed &nbsp;·&nbsp; Works on any modern phone</div>
 
   </div>
 </div>
@@ -2196,14 +2209,19 @@ async function getCurrentCity(lat, lon) {
     const city    = addr.city || addr.town || addr.county || '';
     const suburb  = addr.suburb || addr.neighbourhood || addr.quarter || addr.district || '';
     const country = addr.country || '';
-    const result  = city; // keep backward compat — callers expecting string still get city
-    result._suburb  = suburb;
-    result._country = country;
-    result._full    = [suburb, city, country].filter(Boolean).join(', ');
+    // Must be a plain object — primitives silently drop custom properties
+    const result = {
+      toString()  { return city; },
+      valueOf()   { return city; },
+      _suburb:  suburb,
+      _country: country,
+      _full:    [suburb, city, country].filter(Boolean).join(', '),
+    };
     _cityCache.set(key, result);
     return result;
-  } catch {
-    return '';
+  } catch(e) {
+    dbg('getCurrentCity error: ' + e.message);
+    return { toString(){ return ''; }, valueOf(){ return ''; }, _suburb:'', _country:'', _full:'' };
   }
 }
 
@@ -2665,19 +2683,31 @@ document.getElementById('demo-btn').addEventListener('click', startDemo);
 async function fetchRentalPlaces(lat, lon) {
   try {
     const cityResult = await getCurrentCity(lat, lon);
-    const city    = typeof cityResult === 'string' ? cityResult : String(cityResult);
+    const city    = String(cityResult);
     const suburb  = cityResult._suburb  || '';
     const country = cityResult._country || '';
     const locality = [suburb, city].filter(Boolean).join(', ');
-    dbg('Rentals fetch: ' + (locality || lat.toFixed(4)+','+lon.toFixed(4)));
+    dbg('Rentals► loc="' + locality + '" suburb="' + suburb + '" country="' + country + '"');
+    const payload = { lat, lon, city, suburb, country };
+    dbg('Rentals► POST /api/rentals ' + JSON.stringify(payload).slice(0, 120));
     const res = await fetch('/api/rentals', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lat, lon, city, suburb, country }),
+      body: JSON.stringify(payload),
     });
-    if(!res.ok){ dbg('Rentals API error: '+res.status); return; }
+    dbg('Rentals► HTTP ' + res.status + ' ' + res.statusText);
+    if(!res.ok){
+      const errText = await res.text().catch(()=>'');
+      dbg('Rentals► error body: ' + errText.slice(0,200));
+      return;
+    }
     const data = await res.json();
-    if(!data.listings||!data.listings.length){ dbg('Rentals: 0 listings'); return; }
+    dbg('Rentals► response keys: ' + Object.keys(data).join(', '));
+    if(!data.listings || !data.listings.length){
+      dbg('Rentals► 0 listings — raw: ' + JSON.stringify(data).slice(0,300));
+      return;
+    }
+    dbg('Rentals► got ' + data.listings.length + ' listings');
     // Spread rental coords if Llama placed them all at the same point
     const SPREAD = 0.0015; // ~150m spread radius
     state.rentalPlaces = data.listings.map((l,i) => {
@@ -2691,8 +2721,8 @@ async function fetchRentalPlaces(lat, lon) {
         dist: haversine(lat, lon, l.lat + jitterLat, l.lon + jitterLon),
       };
     });
-    dbg('Rentals loaded: ' + state.rentalPlaces.length);
-    state.rentalPlaces.forEach((r,i) => dbg('RENT['+i+'] lat='+r.lat.toFixed(4)+' lon='+r.lon.toFixed(4)+' dist='+Math.round(r.dist)+'m "'+r.name.slice(0,20)+'"'));
+    dbg('Rentals► loaded ' + state.rentalPlaces.length + ' places');
+    state.rentalPlaces.forEach((r,i) => dbg('RENT['+i+'] '+r.currency+' '+r.price+'/mo dist='+Math.round(r.dist)+'m "'+r.name.slice(0,24)+'"'));
     const _onlyBz=state_filters.has('bazinga')&&state_filters.size===1;
     const _onlyRent=state_filters.has('rentals')&&state_filters.size===1;
     placeCount.textContent =
