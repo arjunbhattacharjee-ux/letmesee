@@ -1005,12 +1005,12 @@ function handleFilterTap(fid){
   filterBar.querySelectorAll('.filter-chip').forEach(chip => {
     chip.classList.toggle('active', state_filters.has(chip.dataset.fid));
   });
-  const _onlyBz   = state_filters.has('bazinga') && state_filters.size === 1;
-  const _onlyRent = state_filters.has('rentals')  && state_filters.size === 1;
-  const _osmVis   = (_onlyBz || _onlyRent) ? 0 : state.places.filter(placePassesFilter).length;
-  const _bzVis    = state_filters.has('all') || state_filters.has('bazinga') ? state.bazingaPlaces.length : 0;
-  const _rentVis  = state_filters.has('all') || state_filters.has('rentals') ? (state.rentalPlaces||[]).length : 0;
-  placeCount.textContent = _osmVis + _bzVis + _rentVis;
+  const _onlyBz=state_filters.has('bazinga')&&state_filters.size===1;
+  const _onlyRent=state_filters.has('rentals')&&state_filters.size===1;
+  const _osmVis=(_onlyBz||_onlyRent)?0:state.places.filter(placePassesFilter).length;
+  const _bzVis=state_filters.has('all')||state_filters.has('bazinga')?state.bazingaPlaces.length:0;
+  const _rentVis=state_filters.has('all')||state_filters.has('rentals')?(state.rentalPlaces||[]).length:0;
+  placeCount.textContent=_osmVis+_bzVis+_rentVis;
 }
 
 function showFilterBar(){
@@ -1102,7 +1102,7 @@ async function fetchPlaces(lat, lon){
       const parsed = JSON.parse(cached);
       if(Array.isArray(parsed) && parsed.length > 0){
         state.places = parsed.map(p => ({ ...p, dist: haversine(lat, lon, p.lat, p.lon) }));
-        placeCount.textContent = state.places.filter(placePassesFilter).length + (state.bazingaPlaces||[]).length + (state.rentalPlaces||[]).length;
+        placeCount.textContent = state.places.filter(placePassesFilter).length+(state.bazingaPlaces||[]).length+(state.rentalPlaces||[]).length;
         statusPill.textContent = state.places.length + ' places nearby (cached)';
         dbg('Cache hit — ' + state.places.length + ' places, age=' + Math.round(ageSec) + 's moved=' + Math.round(movedM) + 'm');
         fetchFailed = false;
@@ -1208,7 +1208,7 @@ async function fetchPlaces(lat, lon){
 
     dbg('Raw=' + data.elements.length + ' named=' + afterNull.length + ' inRadius=' + afterRadius.length + ' final=' + sorted.length);
     state.places = sorted;
-    placeCount.textContent = sorted.filter(placePassesFilter).length + (state.bazingaPlaces||[]).length + (state.rentalPlaces||[]).length;
+    placeCount.textContent = sorted.filter(placePassesFilter).length+(state.bazingaPlaces||[]).length+(state.rentalPlaces||[]).length;
     fetchFailed = false;
     currentRadius = MAX_DIST;
 
@@ -1782,18 +1782,18 @@ function renderFrame(){
     const isBazinga = !!place.isBazinga;
     const isRental  = !!place.isRental;
     const emoji = isRental ? '🏠' : isBazinga ? '⚡' : getTypeEmoji(place.tags);
-    const [dotR, dotG, dotB] = isRental ? [52, 199, 89] : isBazinga ? [255, 214, 10] : getDotColor(place.tags);
-    const iconSize = (isBazinga || isRental) ? 32 + distFactor * 6 : 28 + distFactor * 8;
-    const bubbleR  = iconSize / 2 + 4;
-    const ep = isBazinga ? pulse * (1 + 0.18 * Math.sin(now / 400)) : isRental ? pulse * (1 + 0.10 * Math.sin(now / 600)) : pulse;
+    const [dotR, dotG, dotB] = isRental ? [52,199,89] : isBazinga ? [255,214,10] : getDotColor(place.tags);
+    const iconSize = (isBazinga||isRental) ? 32+distFactor*6 : 28+distFactor*8;
+    const bubbleR  = iconSize/2+4;
+    const ep = isBazinga ? pulse*(1+0.18*Math.sin(now/400)) : isRental ? pulse*(1+0.10*Math.sin(now/600)) : pulse;
 
     // Glow
-    const glowMult = (isBazinga || isRental) ? 2.2 : 1.6;
-    const glow = ctx.createRadialGradient(x, y, bubbleR * 0.5, x, y, bubbleR * glowMult);
-    glow.addColorStop(0, `rgba(${dotR},${dotG},${dotB},${alpha * ((isBazinga || isRental) ? 0.55 : 0.35)})`);
+    const glowMult = (isBazinga||isRental) ? 2.2 : 1.6;
+    const glow = ctx.createRadialGradient(x, y, bubbleR*0.5, x, y, bubbleR*glowMult);
+    glow.addColorStop(0, `rgba(${dotR},${dotG},${dotB},${alpha*((isBazinga||isRental)?0.55:0.35)})`);
     glow.addColorStop(1, `rgba(${dotR},${dotG},${dotB},0)`);
     ctx.beginPath();
-    ctx.arc(x, y, bubbleR * glowMult, 0, Math.PI * 2);
+    ctx.arc(x, y, bubbleR*glowMult, 0, Math.PI*2);
     ctx.fillStyle = glow; ctx.fill();
 
     // Bubble fill
@@ -1804,8 +1804,8 @@ function renderFrame(){
     // Bubble border
     ctx.beginPath();
     ctx.arc(x, y, bubbleR * ep, 0, Math.PI * 2);
-    ctx.strokeStyle = (isBazinga || isRental) ? `rgba(255,255,255,${edgeFade * 0.9})` : `rgba(255,255,255,${edgeFade * 0.55})`;
-    ctx.lineWidth = (isBazinga || isRental) ? 2 : 1.5; ctx.stroke();
+    ctx.strokeStyle = (isBazinga||isRental) ? `rgba(255,255,255,${edgeFade*0.9})` : `rgba(255,255,255,${edgeFade*0.55})`;
+    ctx.lineWidth = (isBazinga||isRental) ? 2 : 1.5; ctx.stroke();
 
     // Emoji
     ctx.font = `${iconSize * ep}px sans-serif`;
@@ -1816,7 +1816,7 @@ function renderFrame(){
 
     // Name label
     {
-      ctx.font = (isBazinga || isRental) ? `700 12px 'DM Sans', sans-serif` : `600 12px 'DM Sans', sans-serif`;
+      ctx.font = (isBazinga||isRental) ? `700 12px 'DM Sans', sans-serif` : `600 12px 'DM Sans', sans-serif`;
       ctx.textAlign = 'center';
       const nameW = ctx.measureText(place.name).width + 16;
       const nameY = y - bubbleR * ep - 10;
@@ -1827,15 +1827,15 @@ function renderFrame(){
       ctx.fillText(place.name, x, nameY);
     }
 
-    // Distance / price label
+    // Distance / price
     {
       ctx.font = `500 10px 'DM Sans', sans-serif`; ctx.textAlign = 'center';
       if(isRental && place.price){
-        ctx.fillStyle = `rgba(52,199,89,${edgeFade*alpha})`;
-        ctx.fillText(place.currency+' '+place.price.toLocaleString()+'/mo', x, y + bubbleR * ep + 14);
+        ctx.fillStyle=`rgba(52,199,89,${edgeFade*alpha})`;
+        ctx.fillText(place.currency+' '+place.price.toLocaleString()+'/mo', x, y+bubbleR*ep+14);
       } else {
-        ctx.fillStyle = `rgba(255,255,255,${edgeFade * alpha * 0.8})`;
-        ctx.fillText(formatDist(place.dist), x, y + bubbleR * ep + 14);
+        ctx.fillStyle=`rgba(255,255,255,${edgeFade*alpha*0.8})`;
+        ctx.fillText(formatDist(place.dist), x, y+bubbleR*ep+14);
       }
     }
 
@@ -1894,12 +1894,19 @@ async function getCurrentCity(lat, lon) {
   const key = `${lat.toFixed(3)},${lon.toFixed(3)}`;
   if (_cityCache.has(key)) return _cityCache.get(key);
   try {
-    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=10&addressdetails=1`;
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=14&addressdetails=1`;
     const res = await fetch(url, { headers: { 'Accept-Language': 'en' } });
     const data = await res.json();
-    const city = data.address?.city || data.address?.town || data.address?.county || '';
-    _cityCache.set(key, city);
-    return city;
+    const addr = data.address || {};
+    const city    = addr.city || addr.town || addr.county || '';
+    const suburb  = addr.suburb || addr.neighbourhood || addr.quarter || addr.district || '';
+    const country = addr.country || '';
+    const result  = city; // keep backward compat — callers expecting string still get city
+    result._suburb  = suburb;
+    result._country = country;
+    result._full    = [suburb, city, country].filter(Boolean).join(', ');
+    _cityCache.set(key, result);
+    return result;
   } catch {
     return '';
   }
@@ -2203,29 +2210,19 @@ function openPanel(place){
     document.getElementById('panel-category').textContent = '🏠 RENTAL · ' + (place.type||'APARTMENT').toUpperCase();
     document.getElementById('panel-name').textContent = place.name;
     document.getElementById('panel-dist').textContent = formatDist(place.dist) + ' away';
-    const tagRow = document.getElementById('panel-tags');
-    tagRow.innerHTML = '';
+    const tagRow = document.getElementById('panel-tags'); tagRow.innerHTML = '';
     const addTag = (txt, color) => {
-      const s = document.createElement('span'); s.className = 'tag';
-      if(color) s.style.cssText = `color:${color};border-color:${color}44;`;
-      s.textContent = txt; tagRow.appendChild(s);
+      const s=document.createElement('span'); s.className='tag';
+      if(color) s.style.cssText=`color:${color};border-color:${color}44;`;
+      s.textContent=txt; tagRow.appendChild(s);
     };
-    if(place.price)             addTag(place.currency + ' ' + place.price.toLocaleString() + '/mo', '#34C759');
-    if(place.bedrooms != null)  addTag(place.bedrooms === 0 ? 'Studio' : place.bedrooms + ' BR');
-    if(place.area_sqft)         addTag(place.area_sqft.toLocaleString() + ' sqft');
-    if(place.building)          addTag(place.building);
-    const rows = document.getElementById('panel-rows'); rows.innerHTML = '';
-    if(place.summary){
-      const se = document.createElement('div');
-      se.style.cssText = 'font-size:14px;line-height:1.65;color:rgba(255,255,255,0.85);padding:10px 0;';
-      se.textContent = place.summary; rows.appendChild(se);
-    }
-    if(place.url){
-      const a = document.createElement('a'); a.href = place.url; a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      a.style.cssText = 'display:inline-flex;align-items:center;gap:5px;margin-top:6px;font-size:12px;color:#34C759;text-decoration:none;';
-      a.textContent = '🔗 View listing →'; rows.appendChild(a);
-    }
+    if(place.price)            addTag(place.currency+' '+place.price.toLocaleString()+'/mo','#34C759');
+    if(place.bedrooms!=null)   addTag(place.bedrooms===0?'Studio':place.bedrooms+' BR');
+    if(place.area_sqft)        addTag(place.area_sqft.toLocaleString()+' sqft');
+    if(place.building)         addTag(place.building);
+    const rows=document.getElementById('panel-rows'); rows.innerHTML='';
+    if(place.summary){ const se=document.createElement('div'); se.style.cssText='font-size:14px;line-height:1.65;color:rgba(255,255,255,0.85);padding:10px 0;'; se.textContent=place.summary; rows.appendChild(se); }
+    if(place.url){ const a=document.createElement('a'); a.href=place.url; a.target='_blank'; a.rel='noopener noreferrer'; a.style.cssText='display:inline-flex;align-items:center;gap:5px;margin-top:6px;font-size:12px;color:#34C759;text-decoration:none;'; a.textContent='🔗 View listing →'; rows.appendChild(a); }
     document.getElementById('heritage-card').classList.remove('visible');
     infoPanel.classList.add('open');
     return;
@@ -2372,32 +2369,32 @@ document.getElementById('demo-btn').addEventListener('click', startDemo);
 
 async function fetchRentalPlaces(lat, lon) {
   try {
-    const city    = typeof currentCity    !== 'undefined' ? currentCity    : null;
-    const country = typeof currentCountry !== 'undefined' ? currentCountry : null;
-    dbg('Rentals fetch: ' + (city || lat.toFixed(3) + ',' + lon.toFixed(3)));
+    const cityResult = await getCurrentCity(lat, lon);
+    const city    = typeof cityResult === 'string' ? cityResult : String(cityResult);
+    const suburb  = cityResult._suburb  || '';
+    const country = cityResult._country || '';
+    const locality = [suburb, city].filter(Boolean).join(', ');
+    dbg('Rentals fetch: ' + (locality || lat.toFixed(4)+','+lon.toFixed(4)));
     const res = await fetch('/api/rentals', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lat, lon, city, country }),
+      body: JSON.stringify({ lat, lon, city, suburb, country }),
     });
-    if (!res.ok) { dbg('Rentals API error: ' + res.status); return; }
+    if(!res.ok){ dbg('Rentals API error: '+res.status); return; }
     const data = await res.json();
-    if (!data.listings || data.listings.length === 0) { dbg('Rentals: 0 listings returned'); return; }
-    state.rentalPlaces = data.listings.map((l, i) => ({
-      ...l,
-      id:       l.id || 'rent_' + i,
-      isRental: true,
-      tags:     {},
-      dist:     haversine(lat, lon, l.lat, l.lon),
+    if(!data.listings||!data.listings.length){ dbg('Rentals: 0 listings'); return; }
+    state.rentalPlaces = data.listings.map((l,i) => ({
+      ...l, id: l.id||'rent_'+i, isRental: true, tags: {},
+      dist: haversine(lat, lon, l.lat, l.lon),
     }));
-    dbg('Rentals loaded: ' + state.rentalPlaces.length + ' listings');
-    const _onlyBz   = state_filters.has('bazinga') && state_filters.size === 1;
-    const _onlyRent = state_filters.has('rentals')  && state_filters.size === 1;
-    const _osmVis   = (_onlyBz || _onlyRent) ? 0 : state.places.filter(placePassesFilter).length;
-    const _bzVis    = state_filters.has('all') || state_filters.has('bazinga') ? state.bazingaPlaces.length : 0;
-    const _rentVis  = state_filters.has('all') || state_filters.has('rentals') ? state.rentalPlaces.length  : 0;
-    placeCount.textContent = _osmVis + _bzVis + _rentVis;
-  } catch(e) { dbg('fetchRentalPlaces: ' + e.message); }
+    dbg('Rentals loaded: ' + state.rentalPlaces.length);
+    const _onlyBz=state_filters.has('bazinga')&&state_filters.size===1;
+    const _onlyRent=state_filters.has('rentals')&&state_filters.size===1;
+    placeCount.textContent =
+      ((_onlyBz||_onlyRent)?0:state.places.filter(placePassesFilter).length) +
+      (state_filters.has('all')||state_filters.has('bazinga')?state.bazingaPlaces.length:0) +
+      (state_filters.has('all')||state_filters.has('rentals')?state.rentalPlaces.length:0);
+  } catch(e){ dbg('fetchRentalPlaces: '+e.message); }
 }
 
 async function fetchBazingaPlaces(lat, lon) {
