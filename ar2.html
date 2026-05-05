@@ -364,10 +364,11 @@
     display: flex; align-items: center; justify-content: center;
     font-size: calc(var(--sz,36px) * 0.45);
     border: 1.5px solid rgba(255,255,255,0.2);
-    background: rgba(var(--cr,52,211,153),0.18);
+    /* background-color set inline per-pip; iOS Safari rejects rgba(var(--cr),0.18) */
+    background-color: rgba(52,211,153,0.18);
     backdrop-filter: blur(4px);
     -webkit-backdrop-filter: blur(4px);
-    box-shadow: 0 0 14px rgba(var(--cr,52,211,153),0.25);
+    box-shadow: 0 0 14px rgba(52,211,153,0.25);
   }
   .ar-pip-label {
     background: rgba(0,0,0,0.65);
@@ -1019,33 +1020,33 @@
       <div class="splash-phone-frame">
         <div class="splash-ar-bg"></div>
         <div class="ar-dot-cluster">
-          <!-- Food pip -->
-          <div class="ar-pip" style="left:18%;top:28%;--dur:4.2s;--del:0s;--sz:34px;--cr:255,159,10">
-            <div class="ar-pip-bubble">🍔</div>
+          <!-- Food pip — orange #FF9F0A -->
+          <div class="ar-pip" style="left:18%;top:28%;--dur:4.2s;--del:0s;--sz:34px">
+            <div class="ar-pip-bubble" style="background-color:rgba(255,159,10,0.18);box-shadow:0 0 14px rgba(255,159,10,0.25)">🍔</div>
             <div class="ar-pip-label">Shake Shack</div>
             <div style="font-size:8px;color:rgba(255,255,255,0.3)">120 m</div>
           </div>
-          <!-- Hotel pip -->
-          <div class="ar-pip" style="left:55%;top:18%;--dur:3.8s;--del:0.6s;--sz:30px;--cr:10,132,255">
-            <div class="ar-pip-bubble">🏨</div>
+          <!-- Hotel pip — blue #0A84FF -->
+          <div class="ar-pip" style="left:55%;top:18%;--dur:3.8s;--del:0.6s;--sz:30px">
+            <div class="ar-pip-bubble" style="background-color:rgba(10,132,255,0.18);box-shadow:0 0 14px rgba(10,132,255,0.25)">🏨</div>
             <div class="ar-pip-label">Marriott</div>
             <div style="font-size:8px;color:rgba(255,255,255,0.3)">380 m</div>
           </div>
-          <!-- Rental pip -->
-          <div class="ar-pip" style="left:74%;top:44%;--dur:5s;--del:1.2s;--sz:32px;--cr:52,211,153">
-            <div class="ar-pip-bubble">🏠</div>
+          <!-- Rental pip — green #34d399 -->
+          <div class="ar-pip" style="left:74%;top:44%;--dur:5s;--del:1.2s;--sz:32px">
+            <div class="ar-pip-bubble" style="background-color:rgba(52,211,153,0.18);box-shadow:0 0 14px rgba(52,211,153,0.25)">🏠</div>
             <div class="ar-pip-label">2BR Apt</div>
             <div class="ar-pip-price">AED 9,200/mo</div>
           </div>
-          <!-- ATM pip -->
-          <div class="ar-pip" style="left:36%;top:52%;--dur:4.6s;--del:0.3s;--sz:28px;--cr:255,214,10">
-            <div class="ar-pip-bubble">🏧</div>
+          <!-- ATM pip — yellow #FFD60A -->
+          <div class="ar-pip" style="left:36%;top:52%;--dur:4.6s;--del:0.3s;--sz:28px">
+            <div class="ar-pip-bubble" style="background-color:rgba(255,214,10,0.18);box-shadow:0 0 14px rgba(255,214,10,0.25)">🏧</div>
             <div class="ar-pip-label">ADCB ATM</div>
             <div style="font-size:8px;color:rgba(255,255,255,0.3)">55 m</div>
           </div>
-          <!-- News pip -->
-          <div class="ar-pip" style="left:10%;top:58%;--dur:3.5s;--del:1.8s;--sz:28px;--cr:255,214,10">
-            <div class="ar-pip-bubble">⚡</div>
+          <!-- News pip — yellow #FFD60A -->
+          <div class="ar-pip" style="left:10%;top:58%;--dur:3.5s;--del:1.8s;--sz:28px">
+            <div class="ar-pip-bubble" style="background-color:rgba(255,214,10,0.18);box-shadow:0 0 14px rgba(255,214,10,0.25)">⚡</div>
             <div class="ar-pip-label">Road closure</div>
           </div>
         </div>
@@ -1956,53 +1957,31 @@ window.addEventListener('pageshow', e => {
 // ─────────────────────────────────────────────
 //  App start
 // ─────────────────────────────────────────────
-async function startReal(){
-  if(location.protocol !== 'https:' && location.hostname !== 'localhost'){
-    splash.style.display = 'none';
-    const msg = document.createElement('div');
-    msg.style.cssText = 'position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:40px;text-align:center;background:#0a0a0c;z-index:200;';
-    msg.innerHTML = '<div style="font-size:40px">🔒</div><div style="font-size:18px;font-weight:600">HTTPS required</div><div style="font-size:14px;color:rgba(255,255,255,0.5);max-width:280px">Camera, GPS, and compass only work on secure (HTTPS) connections.</div>';
-    document.body.appendChild(msg);
-    return;
-  }
-
-  // iOS: DeviceOrientationEvent.requestPermission MUST be called synchronously
-  // inside the original user-gesture handler — before any awaits that show UI prompts.
-  // We call it first, before startCamera(), so the gesture context is still active.
-  let orientationRequested = false;
-  if(typeof DeviceOrientationEvent !== 'undefined' &&
-     typeof DeviceOrientationEvent.requestPermission === 'function'){
-    try {
-      const perm = await DeviceOrientationEvent.requestPermission();
-      dbg('orientation permission: ' + perm);
-      if(perm === 'granted'){
-        registerOrientationListeners();
-        state.permOrientation = true;
-        setInterval(registerOrientationListeners, 10000);
-      } else {
-        dbg('compass: permission denied — radar mode only');
-      }
-      orientationRequested = true;
-    } catch(err){
-      dbg('compass permission error: ' + err.message);
-      orientationRequested = true;
-    }
-  }
-
-  // Now hide splash and start camera
+// launchApp — called after orientation permission is settled (granted or denied).
+// This function is allowed to freely use await because it is NOT called
+// synchronously from the gesture handler; requestPermission() has already fired.
+async function launchApp(){
+  // Transition: hide splash immediately so the user sees progress
   splash.style.display = 'none';
-  document.body.classList.add('app-ready'); // enable overflow:hidden / touch-action:none
+  document.body.classList.add('app-ready');
   statusPill.textContent = 'Requesting camera…';
   const _gpsDotInit = document.getElementById('gps-dot');
   if(_gpsDotInit) _gpsDotInit.classList.add('searching');
 
-  await startCamera();
-
-  // Non-iOS: register orientation listeners now (no permission needed)
-  if(!orientationRequested){
+  // Non-iOS: register orientation listeners here (no permission needed)
+  if(!state.permOrientation &&
+     (typeof DeviceOrientationEvent === 'undefined' ||
+      typeof DeviceOrientationEvent.requestPermission !== 'function')){
     registerOrientationListeners();
     state.permOrientation = true;
     dbg('compass: no permission needed, listeners registered');
+  }
+
+  try {
+    await startCamera();
+  } catch(camErr) {
+    dbg('Camera start error: ' + (camErr && camErr.message));
+    showErrorToast('⚠️ Camera unavailable — AR overlay only');
   }
 
   state.ready = true;
@@ -2723,8 +2702,68 @@ infoPanel.addEventListener('touchend', e => {
 // ─────────────────────────────────────────────
 //  Buttons
 // ─────────────────────────────────────────────
-document.getElementById('start-btn').addEventListener('click', startReal);
-document.getElementById('demo-btn').addEventListener('click', startDemo);
+// ─────────────────────────────────────────────
+//  Splash button wiring  (Issues 1 & 3)
+//  start-btn: calls requestPermission() as the
+//  ONLY synchronous action — zero awaits before
+//  it, so iOS keeps the user-gesture token alive.
+//  demo-btn: guarded against double-fire by a
+//  flag so a scroll-tap can't trigger it twice.
+// ─────────────────────────────────────────────
+(function(){
+  var startBtn = document.getElementById('start-btn');
+  var demoBtn  = document.getElementById('demo-btn');
+  var launched = false; // prevents double-launch from either button
+
+  startBtn.addEventListener('click', function onStartClick(){
+    if(launched) return;
+
+    // HTTPS guard — synchronous, no await, safe to check first
+    if(location.protocol !== 'https:' && location.hostname !== 'localhost'){
+      launched = true;
+      splash.style.display = 'none';
+      var msg = document.createElement('div');
+      msg.style.cssText = 'position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:40px;text-align:center;background:#0a0a0c;z-index:200;';
+      msg.innerHTML = '<div style="font-size:40px">🔒</div><div style="font-size:18px;font-weight:600">HTTPS required</div><div style="font-size:14px;color:rgba(255,255,255,0.5);max-width:280px">Camera, GPS, and compass only work on secure (HTTPS) connections.</div>';
+      document.body.appendChild(msg);
+      return;
+    }
+
+    // iOS 13+ DeviceOrientationEvent permission MUST be called synchronously
+    // inside the gesture handler — no await before this call.
+    if(typeof DeviceOrientationEvent !== 'undefined' &&
+       typeof DeviceOrientationEvent.requestPermission === 'function'){
+      launched = true;
+      var permPromise;
+      try { permPromise = DeviceOrientationEvent.requestPermission(); }
+      catch(e){ permPromise = Promise.reject(e); }
+      permPromise
+        .then(function(perm){
+          dbg('orientation permission: ' + perm);
+          if(perm === 'granted'){
+            registerOrientationListeners();
+            state.permOrientation = true;
+            setInterval(registerOrientationListeners, 10000);
+          } else {
+            dbg('compass: permission denied — radar mode only');
+          }
+        })
+        .catch(function(err){ dbg('compass permission error: ' + (err && err.message)); })
+        .finally(function(){ launchApp(); });
+    } else {
+      // Non-iOS: no permission prompt needed, launch directly
+      launched = true;
+      launchApp();
+    }
+  });
+
+  demoBtn.addEventListener('click', function onDemoClick(e){
+    // Prevent accidental double-fire from scroll momentum taps
+    if(launched) return;
+    launched = true;
+    startDemo();
+  }, { passive: false });
+})();
 
 async function fetchRentalPlaces(lat, lon) {
   try {
