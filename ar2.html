@@ -35,12 +35,14 @@
 
   html, body {
     width: 100%; height: 100%;
-    overflow: hidden;
     background: #000;
     font-family: var(--font);
     color: var(--text);
-    touch-action: none;
     -webkit-font-smoothing: antialiased;
+  }
+  body.app-ready {
+    overflow: hidden;
+    touch-action: none;
   }
 
   /* ── Camera ── */
@@ -196,27 +198,27 @@
   #splash {
     position: fixed; inset: 0;
     background: #06060a;
-    display: flex; flex-direction: column;
-    align-items: center; justify-content: flex-start;
-    z-index: 100;
-    overflow-y: auto; overflow-x: hidden;
+    overflow-y: scroll;          /* 'scroll' not 'auto' — forces momentum on iOS */
+    overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
+    z-index: 100;
   }
   #splash::-webkit-scrollbar { display: none; }
 
   /* Noise grain texture */
   #splash::before {
     content: '';
-    position: fixed; inset: 0;
+    position: absolute; inset: 0;
     background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
     opacity: 0.025; pointer-events: none; z-index: 0;
+    min-height: 100%;
   }
 
   /* Radial glow at top */
   #splash::after {
     content: '';
-    position: fixed; top: -80px; left: 50%; transform: translateX(-50%);
+    position: fixed; top: 0; left: 50%; transform: translateX(-50%);
     width: 500px; height: 380px;
     background: radial-gradient(ellipse at 50% 0%, rgba(52,211,153,0.10) 0%, transparent 68%);
     pointer-events: none; z-index: 0;
@@ -226,11 +228,14 @@
 
   .splash-inner {
     position: relative; z-index: 1;
-    width: 100%; max-width: 420px;
-    padding: calc(env(safe-area-inset-top,20px) + 28px) 28px calc(env(safe-area-inset-bottom,20px) + 40px);
+    width: 100%;
+    max-width: 420px;
+    margin: 0 auto;
+    /* min-height must exceed viewport so iOS allows scrolling */
+    min-height: calc(100vh + 1px);
+    padding: calc(env(safe-area-inset-top, 20px) + 28px) 28px calc(env(safe-area-inset-bottom, 20px) + 60px);
     display: flex; flex-direction: column;
     align-items: center;
-    min-height: 100vh;
   }
 
   /* — top badge — */
@@ -302,8 +307,20 @@
     border-radius: 24px;
     overflow: hidden;
     position: relative;
-    aspect-ratio: 16/9;
-    display: flex; align-items: center; justify-content: center;
+    /* aspect-ratio fallback for older Safari < 15 */
+    padding-bottom: 56.25%; /* 16:9 */
+    height: 0;
+  }
+  @supports (aspect-ratio: 16/9) {
+    .splash-phone-frame {
+      aspect-ratio: 16/9;
+      padding-bottom: 0;
+      height: auto;
+    }
+  }
+  .splash-phone-frame > * {
+    position: absolute;
+    inset: 0;
   }
   /* Simulated AR view inside frame */
   .splash-ar-bg {
@@ -1949,16 +1966,44 @@ async function startReal(){
     return;
   }
 
+  // iOS: DeviceOrientationEvent.requestPermission MUST be called synchronously
+  // inside the original user-gesture handler — before any awaits that show UI prompts.
+  // We call it first, before startCamera(), so the gesture context is still active.
+  let orientationRequested = false;
+  if(typeof DeviceOrientationEvent !== 'undefined' &&
+     typeof DeviceOrientationEvent.requestPermission === 'function'){
+    try {
+      const perm = await DeviceOrientationEvent.requestPermission();
+      dbg('orientation permission: ' + perm);
+      if(perm === 'granted'){
+        registerOrientationListeners();
+        state.permOrientation = true;
+        setInterval(registerOrientationListeners, 10000);
+      } else {
+        dbg('compass: permission denied — radar mode only');
+      }
+      orientationRequested = true;
+    } catch(err){
+      dbg('compass permission error: ' + err.message);
+      orientationRequested = true;
+    }
+  }
+
+  // Now hide splash and start camera
   splash.style.display = 'none';
+  document.body.classList.add('app-ready'); // enable overflow:hidden / touch-action:none
   statusPill.textContent = 'Requesting camera…';
-  // Set GPS dot to searching state
   const _gpsDotInit = document.getElementById('gps-dot');
   if(_gpsDotInit) _gpsDotInit.classList.add('searching');
 
-  await Promise.all([
-    startCamera(),
-    requestOrientationPermission()
-  ]);
+  await startCamera();
+
+  // Non-iOS: register orientation listeners now (no permission needed)
+  if(!orientationRequested){
+    registerOrientationListeners();
+    state.permOrientation = true;
+    dbg('compass: no permission needed, listeners registered');
+  }
 
   state.ready = true;
   refreshBtn.style.display = 'flex';
@@ -1973,6 +2018,7 @@ async function startReal(){
 function startDemo(){
   state.demoMode = true;
   splash.style.display = 'none';
+  document.body.classList.add('app-ready');
   loadDemoPlaces();
   window.addEventListener('deviceorientationabsolute', handleOrientation, true);
   window.addEventListener('deviceorientation', handleOrientation, true);
