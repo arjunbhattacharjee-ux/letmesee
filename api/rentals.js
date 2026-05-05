@@ -145,38 +145,77 @@ export default async function handler(req) {
 'Example: [{"name":"2BR Executive Towers","bedrooms":2,"price":9500,"currency":"' + currency + '","type":"apartment","area_sqft":1100,"building":"Executive Towers","summary":"Spacious 2BR in Executive Towers, ' + city + '.","lat":' + exLat + ',"lon":' + exLon + ',"url":null}]\n\n' +
 'If truly zero rentals found in ' + city + ', return exactly: []';
 
-  let listings = null;
+  // Try models in order — Groq deprecates models without much notice
+  const GROQ_MODELS = [
+    'llama-3.3-70b-specdec',
+    'llama-3.1-70b-versatile',
+    'llama3-70b-8192',
+    'mixtral-8x7b-32768',
+  ];
+
+  let listings  = null;
   let llamaRaw  = '';
-  try {
-    const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + groqKey },
-      body: JSON.stringify({
-        model: 'llama3-70b-8192',
-        max_tokens: 2000,
-        temperature: 0.15,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user',   content: userPrompt   },
-        ],
-      }),
-    });
-    if (groqRes.ok) {
-      const gdata = await groqRes.json();
+  let modelUsed = '';
+  let groqDebug = '';
+
+  for (const model of GROQ_MODELS) {
+    try {
+      console.log('[rentals] trying model: ' + model);
+      const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + groqKey },
+        body: JSON.stringify({
+          model,
+          max_tokens: 2000,
+          temperature: 0.15,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user',   content: userPrompt   },
+          ],
+        }),
+      });
+
+      // Always read the body — even non-ok responses tell us why
+      const rawBody = await groqRes.text();
+      console.log('[rentals] Groq ' + model + ' HTTP ' + groqRes.status + ' body: ' + rawBody.slice(0, 300));
+
+      if (!groqRes.ok) {
+        groqDebug += model + ':HTTP' + groqRes.status + ' ';
+        // 404 = model not found, 400 = bad request — try next
+        // 401/429 = auth/rate — no point retrying other models
+        if (groqRes.status === 401 || groqRes.status === 429) break;
+        continue;
+      }
+
+      let gdata;
+      try { gdata = JSON.parse(rawBody); }
+      catch(e) { groqDebug += model + ':bad_json '; continue; }
+
       llamaRaw = gdata.choices?.[0]?.message?.content || '';
-      console.log('[rentals] Llama raw: ' + llamaRaw.slice(0, 400));
+      if (!llamaRaw) {
+        groqDebug += model + ':empty_content ';
+        console.error('[rentals] ' + model + ' returned empty content. Full response: ' + rawBody.slice(0, 400));
+        continue;
+      }
+
+      modelUsed = model;
+      console.log('[rentals] ' + model + ' raw output: ' + llamaRaw.slice(0, 400));
       listings = extractJSON(llamaRaw);
-      if (!listings) console.error('[rentals] JSON parse failed: ' + llamaRaw.slice(0,300));
-    } else {
-      const errBody = await groqRes.text();
-      console.error('[rentals] Groq ' + groqRes.status + ': ' + errBody.slice(0, 200));
+      if (listings && listings.length) break;  // success — stop trying models
+
+      groqDebug += model + ':parse_fail ';
+      console.error('[rentals] JSON parse failed on: ' + llamaRaw.slice(0, 300));
+      listings = null;
+    } catch(e) {
+      groqDebug += model + ':fetch_err ';
+      console.error('[rentals] fetch error for ' + model + ': ' + e.message);
     }
-  } catch(e) { console.error('[rentals] Groq fetch error: ' + e.message); }
+  }
 
   if (!listings || !Array.isArray(listings) || !listings.length) {
     return new Response(JSON.stringify({
       listings: [],
-      debug: { llamaRaw: llamaRaw.slice(0, 600), tavilyCount: results.length }
+      debug: { llamaRaw: llamaRaw.slice(0, 600), tavilyCount: results.length, modelUsed, groqDebug }
     }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 
@@ -212,7 +251,7 @@ export default async function handler(req) {
     })
     .slice(0, 8);
 
-  console.log('[rentals] returning ' + clean.length + ' listings');
+  console.log('[rentals] returning ' + clean.length + ' listings via ' + modelUsed);
   return new Response(JSON.stringify({ listings: clean }), {
     status: 200,
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, s-maxage=1800' },
