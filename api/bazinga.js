@@ -92,16 +92,18 @@ export default async function handler(req) {
   // • Historical/notable — no date limit
   let recentResults = [], cityResults = [], historyResults = [];
   try {
+    // Queries are unquoted so Tavily doesn't need verbatim matches.
+    // All three anchor on both suburb AND city so results stay local.
     [recentResults, cityResults, historyResults] = await Promise.all([
-      tavilySearch(`"${locationLabel}" news 2025`, tavilyKey, 6, 'month'),
-      tavilySearch(`Dubai ${locationLabel} incident crime event 2025`, tavilyKey, 5, 'month'),
-      tavilySearch(`${locationLabel} famous historical notable landmark record`, tavilyKey, 5, null),
+      tavilySearch(`${locationLabel} ${city || ''} news events 2025`.trim(), tavilyKey, 6, 'month'),
+      tavilySearch(`${locationLabel} ${city || ''} incident development update`.trim(), tavilyKey, 5, 'month'),
+      tavilySearch(`${locationLabel} ${city || ''} history landmark notable`.trim(), tavilyKey, 5, null),
     ]);
   } catch (e) {
     console.error('Tavily search failed:', e.message);
     // Try one fallback search without time_range in case that was the issue
     try {
-      historyResults = await tavilySearch(`${locationLabel} Dubai news events`, tavilyKey, 8, null);
+      historyResults = await tavilySearch(`${locationLabel} ${city || ''} news events`.trim(), tavilyKey, 8, null);
     } catch (_) {}
   }
 
@@ -122,7 +124,13 @@ export default async function handler(req) {
   // ── Step 2: Pass real search results to Llama ─────────────────────────────
   const context = buildContext(allResults);
 
-  const systemPrompt = `You are a hyperlocal news analyst. Today is ${todayStr}. You receive real web search snippets about a location and extract interesting stories. Return ONLY a raw JSON array — no markdown, no code fences, no commentary, just the [ ... ] array.`;
+  const systemPrompt = `You are a hyperlocal news analyst. Today is ${todayStr}.
+RULES (follow exactly):
+1. Use ONLY facts present in the search snippets provided. Never invent, hallucinate, or add outside knowledge.
+2. Every spot MUST be geographically in or immediately adjacent to ${locationLabel}${city ? ' / ' + city : ''}. Reject anything unrelated to this locality.
+3. Do not include global, national, or unrelated science/space/world news — only local stories.
+4. If fewer than 2 genuine local stories exist in the snippets, return an empty array [].
+5. Return ONLY a raw JSON array — no markdown, no code fences, no commentary.`;
 
   const userPrompt = `Location: ${locationLabel} (lat ${lat.toFixed(4)}, lon ${lon.toFixed(4)})
 Today: ${todayStr}
@@ -144,31 +152,47 @@ Return a raw JSON array (no markdown, no backticks):
 
   let spots = null;
 
-  try {
-    const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + groqKey },
-      body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
-        max_tokens: 2000,
-        temperature: 0.3,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user',   content: userPrompt   },
-        ],
-      }),
-    });
+  // Try models in order — audited May 2026; see rentals.js for deprecation notes.
+  const GROQ_MODELS = [
+    'llama-3.3-70b-versatile', // primary
+    'llama-3.1-8b-instant',    // fallback
+  ];
 
-    if (groqRes.ok) {
-      const data = await groqRes.json();
-      const text = data.choices?.[0]?.message?.content || '';
+  for (const model of GROQ_MODELS) {
+    if (spots) break;
+    try {
+      const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + groqKey },
+        body: JSON.stringify({
+          model,
+          max_tokens: 2000,
+          temperature: 0.3,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user',   content: userPrompt   },
+          ],
+        }),
+      });
+
+      const rawBody = await groqRes.text();
+      if (!groqRes.ok) {
+        console.error(`Groq ${model} HTTP ${groqRes.status}:`, rawBody.slice(0, 200));
+        if (groqRes.status === 401 || groqRes.status === 429) break; // no point retrying
+        continue;
+      }
+
+      let gdata;
+      try { gdata = JSON.parse(rawBody); } catch (_) { continue; }
+      const text = gdata.choices?.[0]?.message?.content || '';
       spots = extractJSON(text);
-      if (!spots) console.error('Llama JSON parse failed. Raw:', text.slice(0, 300));
-    } else {
-      console.error('Groq error:', groqRes.status, await groqRes.text());
+      if (!spots) {
+        console.error(`Llama ${model} JSON parse failed. Raw:`, text.slice(0, 300));
+        spots = null;
+      }
+    } catch (e) {
+      console.error(`Groq fetch error (${model}):`, e.message);
     }
-  } catch (e) {
-    console.error('Groq fetch error:', e.message);
   }
 
   if (!spots || !Array.isArray(spots) || spots.length === 0) {
