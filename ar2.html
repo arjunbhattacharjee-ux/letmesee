@@ -2703,6 +2703,7 @@ async function fetchRentalPlaces(lat, lon) {
     }
     const data = await res.json();
     dbg('Rentals► response keys: ' + Object.keys(data).join(', '));
+    if(data._debug) data._debug.forEach(line => dbg('SRV: ' + line));
     if(!data.listings || !data.listings.length){
       dbg('Rentals► 0 listings — raw: ' + JSON.stringify(data).slice(0,300));
       return;
