@@ -1,6 +1,5 @@
 // /api/rentals.js — Vercel Edge function
 // Tavily search → Groq/Llama extraction of real rental listings
-// for the user's exact locality (suburb + city + country).
 
 export const config = { runtime: 'edge' };
 
@@ -25,7 +24,20 @@ function getPortals(country = '', city = '', suburb = '') {
   return ['propertyfinder.com', 'lamudi.com'];
 }
 
-async function tavilySearch(query, tavilyKey, maxResults = 7) {
+function getCurrency(country = '', city = '', suburb = '') {
+  const c = [country, city, suburb].join(' ').toLowerCase();
+  if (c.includes('uae') || c.includes('dubai') || c.includes('abu dhabi')) return 'AED';
+  if (c.includes('india'))                                                   return 'INR';
+  if (c.includes('uk') || c.includes('united kingdom') || c.includes('london')) return 'GBP';
+  if (c.includes('australia'))                                               return 'AUD';
+  if (c.includes('singapore'))                                               return 'SGD';
+  if (c.includes('saudi'))                                                   return 'SAR';
+  if (c.includes('qatar'))                                                   return 'QAR';
+  if (c.includes('usa') || c.includes('united states'))                     return 'USD';
+  return 'USD';
+}
+
+async function tavilySearch(query, tavilyKey, maxResults = 8) {
   const res = await fetch('https://api.tavily.com/search', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -45,7 +57,7 @@ async function tavilySearch(query, tavilyKey, maxResults = 7) {
 
 function buildContext(results) {
   return results
-    .map((r, i) => `[${i+1}] ${r.title}\nURL: ${r.url}\n${(r.content||'').slice(0,500)}`)
+    .map((r, i) => `[${i+1}] ${r.title}\nURL: ${r.url}\n${(r.content||'').slice(0,600)}`)
     .join('\n\n---\n\n');
 }
 
@@ -53,8 +65,10 @@ function extractJSON(text) {
   if (!text) return null;
   const t = text.trim();
   if (t.startsWith('[')) { try { return JSON.parse(t); } catch(_){} }
-  const m = t.match(/\[[\s\S]*\]/);
+  const m = t.match(/\[[\s\S]*?\]/);
   if (m) { try { return JSON.parse(m[0]); } catch(_){} }
+  const m2 = t.match(/\[[\s\S]*/);
+  if (m2) { try { return JSON.parse(m2[0]); } catch(_){} }
   return null;
 }
 
@@ -73,77 +87,74 @@ export default async function handler(req) {
   const { lat, lon, city = '', suburb = '', country = '' } = body;
   if (lat == null || lon == null) return new Response(JSON.stringify({error:'Missing lat/lon'}),{status:400,headers:{'Content-Type':'application/json'}});
 
-  // Build the most specific location label possible
-  // e.g. "Business Bay, Dubai, UAE" — this is what goes into search queries
-  const parts = [suburb, city, country].filter(Boolean);
-  const locationLabel = parts.length ? parts.join(', ') : `${lat.toFixed(3)},${lon.toFixed(3)}`;
-  // Shorter label for portal search (suburb + city only)
-  const shortLabel = [suburb, city].filter(Boolean).join(', ') || locationLabel;
+  const suburbLabel = suburb || city;
+  const fullLabel   = [suburb, city, country].filter(Boolean).join(', ');
+  const searchArea  = suburb ? suburb + ' ' + city : city;
+  const currency    = getCurrency(country, city, suburb);
+  const portals     = getPortals(country, city, suburb);
 
-  const portals = getPortals(country, city, suburb);
+  console.log('[rentals] suburb="' + suburb + '" city="' + city + '" currency=' + currency);
 
-  // ── Step 1: Targeted Tavily searches ─────────────────────────────────────
-  // Both queries use the full location label — suburb MUST be present to avoid drift
+  // ── Step 1: 3 broad unquoted Tavily queries ─────────────────────────────────
+  // No exact-phrase quoting — portal snippets rarely contain the full compound string verbatim.
   let results = [];
   try {
-    const [r1, r2] = await Promise.all([
-      tavilySearch(`apartment for rent "${shortLabel}" price bedroom AED 2025`, tavilyKey, 7),
-      tavilySearch(`"${shortLabel}" rental listing ${portals[0]}`, tavilyKey, 6),
-    ]);
+    const queries = [
+      suburbLabel + ' apartment for rent ' + currency + ' price bedroom',
+      searchArea + ' rental listings site:' + portals[0],
+      city + ' ' + suburb + ' flat for rent monthly price 2025',
+    ];
+    console.log('[rentals] queries: ' + JSON.stringify(queries));
+    const fetched = await Promise.all(queries.map(q => tavilySearch(q, tavilyKey, 7).catch(() => [])));
     const seen = new Set();
-    results = [...r1, ...r2].filter(r => {
+    results = fetched.flat().filter(r => {
       if (!r.url || seen.has(r.url)) return false;
       seen.add(r.url); return true;
     });
+    console.log('[rentals] Tavily: ' + results.length + ' unique results');
   } catch(e) {
-    console.error('Tavily error:', e.message);
-    return new Response(JSON.stringify({listings:[]}),{status:200,headers:{'Content-Type':'application/json'}});
+    console.error('[rentals] Tavily error: ' + e.message);
+    return new Response(JSON.stringify({listings:[],debug:'tavily_error:'+e.message}),{status:200,headers:{'Content-Type':'application/json'}});
   }
 
-  if (!results.length) return new Response(JSON.stringify({listings:[]}),{status:200,headers:{'Content-Type':'application/json'}});
+  if (!results.length) {
+    return new Response(JSON.stringify({listings:[],debug:'no_tavily_results'}),{status:200,headers:{'Content-Type':'application/json'}});
+  }
 
-  // ── Step 2: Llama extracts listings — strict location enforcement ─────────
+  // ── Step 2: Llama extraction — city-level match, not suburb-exact ──────────
   const context = buildContext(results);
 
-  const systemPrompt = `You are a real estate data extractor. Today is ${new Date().toISOString().slice(0,10)}.
-STRICT RULES — violating any of these is a failure:
-- Extract ONLY rental listings that are explicitly in "${locationLabel}" or its immediate surroundings.
-- If a result mentions a listing in a DIFFERENT city or country (e.g. Houston, London, New York when the target is Dubai), SKIP IT completely.
-- Never invent prices, bedroom counts, or building names not present in the snippets.
-- Return ONLY raw JSON — no markdown, no backticks, no commentary.`;
+  const systemPrompt = 'You are a real estate data extractor. Today is ' + new Date().toISOString().slice(0,10) + '.\n' +
+'Target city: ' + city + '. Target neighbourhood: ' + suburbLabel + '.\n\n' +
+'RULES:\n' +
+'1. Extract rental listings in ' + city + ' or any of its neighbourhoods — city-level match is enough.\n' +
+'2. Only reject listings in a completely different country or city (e.g. if target is Dubai, reject London or Riyadh).\n' +
+'3. Never invent prices or building names. Use only what is in the snippets.\n' +
+'4. Currency is ' + currency + '. Annual price -> divide by 12 for monthly. Round to nearest 100.\n' +
+'5. Return ONLY a raw JSON array — no markdown, no backticks, no explanation text.';
 
-  const userPrompt = `Target location: ${locationLabel} (lat ${lat.toFixed(4)}, lon ${lon.toFixed(4)})
-
-Search results:
-
-${context}
-
-Extract 4–6 rental listings that are ONLY in ${locationLabel}. Skip any result that is in a different city or country.
-
-For each valid listing:
-- bedrooms: integer (0 for studio), or null
-- price: monthly rent as a number — if yearly given, divide by 12; round to nearest 100
-- currency: infer from context ("AED" for Dubai/UAE, "USD" for USA, "GBP" for UK, "INR" for India, etc.)
-- type: "apartment" | "villa" | "studio" | "townhouse" | "flat"
-- area_sqft: number or null
-- building: tower/building name or null
-- Give EACH listing a DISTINCT lat/lon within 0.02 degrees of ${lat.toFixed(4)}, ${lon.toFixed(4)} — spread them out, do NOT give all listings the same coordinates
-- url: listing URL from the results above, or null
-
-Return ONLY a raw JSON array (no markdown, no backticks):
-[{"name":"2BR Burj Views","bedrooms":2,"price":9500,"currency":"AED","type":"apartment","area_sqft":1200,"building":"Burj Views","summary":"Spacious 2-bedroom in Burj Views tower, Business Bay, with canal views.","lat":${lat.toFixed(4)},"lon":${lon.toFixed(4)},"url":null}]
-
-If NO valid listings are found for ${locationLabel}, return an empty array: []`;
+  const exLat = lat.toFixed(4);
+  const exLon = (lon + 0.003).toFixed(4);
+  const userPrompt = 'Target: ' + fullLabel + ' (lat ' + lat.toFixed(4) + ', lon ' + lon.toFixed(4) + ')\n\n' +
+'Search result snippets:\n' + context + '\n\n' +
+'Extract 4-8 rental listings from the snippets. Accept any listing in ' + city + ' or its neighbourhoods.\n\n' +
+'Each object must have these exact fields:\n' +
+'name, bedrooms (int or null), price (monthly int), currency ("' + currency + '"), type ("apartment"|"villa"|"studio"|"townhouse"|"flat"), area_sqft (int or null), building (string or null), summary (one sentence), lat (float near ' + lat.toFixed(4) + '), lon (float near ' + lon.toFixed(4) + '), url (from snippets or null)\n\n' +
+'Make each listing have DIFFERENT lat/lon values spread within 0.02 degrees.\n' +
+'Start response with [ and end with ]. No other text.\n' +
+'Example: [{"name":"2BR Executive Towers","bedrooms":2,"price":9500,"currency":"' + currency + '","type":"apartment","area_sqft":1100,"building":"Executive Towers","summary":"Spacious 2BR in Executive Towers, ' + city + '.","lat":' + exLat + ',"lon":' + exLon + ',"url":null}]\n\n' +
+'If truly zero rentals found in ' + city + ', return exactly: []';
 
   let listings = null;
+  let llamaRaw  = '';
   try {
     const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + groqKey },
       body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
-        max_tokens: 1800,
-        temperature: 0.1,   // near-zero — pure extraction, zero creativity
+        model: 'llama3-70b-8192',
+        max_tokens: 2000,
+        temperature: 0.15,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user',   content: userPrompt   },
@@ -151,62 +162,58 @@ If NO valid listings are found for ${locationLabel}, return an empty array: []`;
       }),
     });
     if (groqRes.ok) {
-      const data = await groqRes.json();
-      const text = data.choices?.[0]?.message?.content || '';
-      listings = extractJSON(text);
-      if (!listings) console.error('Llama parse failed:', text.slice(0,300));
+      const gdata = await groqRes.json();
+      llamaRaw = gdata.choices?.[0]?.message?.content || '';
+      console.log('[rentals] Llama raw: ' + llamaRaw.slice(0, 400));
+      listings = extractJSON(llamaRaw);
+      if (!listings) console.error('[rentals] JSON parse failed: ' + llamaRaw.slice(0,300));
     } else {
-      console.error('Groq error:', groqRes.status, await groqRes.text());
+      const errBody = await groqRes.text();
+      console.error('[rentals] Groq ' + groqRes.status + ': ' + errBody.slice(0, 200));
     }
-  } catch(e) { console.error('Groq fetch error:', e.message); }
+  } catch(e) { console.error('[rentals] Groq fetch error: ' + e.message); }
 
   if (!listings || !Array.isArray(listings) || !listings.length) {
-    return new Response(JSON.stringify({listings:[]}),{status:200,headers:{'Content-Type':'application/json'}});
+    return new Response(JSON.stringify({
+      listings: [],
+      debug: { llamaRaw: llamaRaw.slice(0, 600), tavilyCount: results.length }
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 
-  // Derive a sensible fallback currency from the country
-  const _c = [country, city, suburb].join(' ').toLowerCase();
-  const defaultCurrency =
-    _c.includes('uae')||_c.includes('dubai')||_c.includes('abu dhabi') ? 'AED' :
-    _c.includes('india')                                                ? 'INR' :
-    _c.includes('uk')||_c.includes('united kingdom')||_c.includes('london') ? 'GBP' :
-    _c.includes('australia')                                            ? 'AUD' :
-    _c.includes('singapore')                                            ? 'SGD' :
-    _c.includes('saudi')                                                ? 'SAR' :
-    _c.includes('qatar')                                                ? 'QAR' :
-    _c.includes('usa')||_c.includes('united states')                    ? 'USD' :
-    'USD';
-
-  // Spread coords server-side in case Llama placed all listings at the same point
-  const SPREAD = 0.0012;
+  // ── Step 3: Sanitise + spread coords ───────────────────────────────────────
+  const SPREAD = 0.0014;
   const firstLat = listings[0]?.lat;
   const firstLon = listings[0]?.lon;
-  const clean = listings
-    .filter(l => l && l.name && l.lat && l.lon)
-    .map((l,i) => {
-      const allSame = listings.every(x => x.lat === firstLat && x.lon === firstLon);
-      const angle = (i / listings.length) * 2 * Math.PI;
-      const jLat = allSame ? Math.cos(angle) * SPREAD * (0.6 + i * 0.2) : 0;
-      const jLon = allSame ? Math.sin(angle) * SPREAD * (0.6 + i * 0.2) : 0;
-      return ({
-      id:         'rent_'+i,
-      isRental:   true,
-      name:       (l.name||'Rental').slice(0,40),
-      bedrooms:   Number.isInteger(l.bedrooms) ? l.bedrooms : (l.bedrooms!=null ? parseInt(l.bedrooms)||null : null),
-      price:      l.price ? Math.round(parseFloat(l.price)) : null,
-      currency:   (l.currency || defaultCurrency).slice(0,5),
-      type:       (l.type||'apartment').slice(0,20),
-      area_sqft:  l.area_sqft ? Math.round(parseFloat(l.area_sqft)) : null,
-      building:   l.building ? l.building.slice(0,50) : null,
-      summary:    (l.summary||'').slice(0,300),
-      lat:        Math.max(lat-0.025, Math.min(lat+0.025, parseFloat(l.lat)+jLat)),
-      lon:        Math.max(lon-0.025, Math.min(lon+0.025, parseFloat(l.lon)+jLon)),
-      url:        l.url && l.url.startsWith('http') ? l.url : null,
-    });
-  })
-    .slice(0, 6);
 
-  return new Response(JSON.stringify({listings: clean}), {
+  const clean = listings
+    .filter(l => l && l.name)
+    .map((l, i) => {
+      const allSame = listings.every(x => x.lat === firstLat && x.lon === firstLon);
+      const angle   = (i / listings.length) * 2 * Math.PI;
+      const jLat    = allSame ? Math.cos(angle) * SPREAD * (0.7 + i * 0.15) : 0;
+      const jLon    = allSame ? Math.sin(angle) * SPREAD * (0.7 + i * 0.15) : 0;
+      const rawLat  = parseFloat(l.lat) || lat;
+      const rawLon  = parseFloat(l.lon) || lon;
+      return {
+        id:        'rent_' + i,
+        isRental:  true,
+        name:      (l.name || 'Rental').slice(0, 40),
+        bedrooms:  Number.isInteger(l.bedrooms) ? l.bedrooms : (l.bedrooms != null ? parseInt(l.bedrooms) || null : null),
+        price:     l.price ? Math.round(parseFloat(l.price)) : null,
+        currency:  (l.currency || currency).slice(0, 5),
+        type:      (l.type || 'apartment').slice(0, 20),
+        area_sqft: l.area_sqft ? Math.round(parseFloat(l.area_sqft)) : null,
+        building:  l.building ? l.building.slice(0, 50) : null,
+        summary:   (l.summary || '').slice(0, 300),
+        lat:       Math.max(lat - 0.025, Math.min(lat + 0.025, rawLat + jLat)),
+        lon:       Math.max(lon - 0.025, Math.min(lon + 0.025, rawLon + jLon)),
+        url:       l.url && l.url.startsWith('http') ? l.url : null,
+      };
+    })
+    .slice(0, 8);
+
+  console.log('[rentals] returning ' + clean.length + ' listings');
+  return new Response(JSON.stringify({ listings: clean }), {
     status: 200,
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, s-maxage=1800' },
   });
