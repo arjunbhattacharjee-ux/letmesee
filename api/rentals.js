@@ -145,12 +145,15 @@ export default async function handler(req) {
 'Example: [{"name":"2BR Executive Towers","bedrooms":2,"price":9500,"currency":"' + currency + '","type":"apartment","area_sqft":1100,"building":"Executive Towers","summary":"Spacious 2BR in Executive Towers, ' + city + '.","lat":' + exLat + ',"lon":' + exLon + ',"url":null}]\n\n' +
 'If truly zero rentals found in ' + city + ', return exactly: []';
 
-  // Try models in order — Groq deprecates models without much notice
+  // Try models in order — keep current; Groq deprecates frequently.
+  // Audited May 2026 against console.groq.com/docs/models + /docs/deprecations:
+  //   llama-3.3-70b-specdec   removed (experimental variant)
+  //   llama-3.1-70b-versatile removed Jan 24 2025 (superseded by 3.3)
+  //   llama3-70b-8192         deprecated May 31 2025
+  //   mixtral-8x7b-32768      deprecated March 5 2025
   const GROQ_MODELS = [
-    'llama-3.3-70b-specdec',
-    'llama-3.1-70b-versatile',
-    'llama3-70b-8192',
-    'mixtral-8x7b-32768',
+    'llama-3.3-70b-versatile', // primary — 128K ctx, JSON mode, tool use
+    'llama-3.1-8b-instant',    // fallback — faster/cheaper, same 128K ctx
   ];
 
   let listings  = null;
