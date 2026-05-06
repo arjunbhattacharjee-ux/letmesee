@@ -60,51 +60,45 @@ function extractJSON(text) {
 
 // ─── Main handler ─────────────────────────────────────────────────────────────
 export default async function handler(req) {
-  if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405, headers: { 'Content-Type': 'application/json' },
-    });
-  }
+  const _debug = [];
+  const log = (...args) => { const msg = args.join(' '); console.log(msg); _debug.push(msg); };
+  const fail = (status, msg) => new Response(JSON.stringify({ error: msg, _debug }), { status, headers: { 'Content-Type': 'application/json' } });
+
+  if (req.method !== 'POST') return fail(405, 'Method not allowed');
 
   const tavilyKey = process.env.TAVILY_API_KEY;
   const groqKey   = process.env.GROQ_API_KEY;
 
-  if (!tavilyKey) return new Response(JSON.stringify({ error: 'TAVILY_API_KEY not configured' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
-  if (!groqKey)   return new Response(JSON.stringify({ error: 'GROQ_API_KEY not configured' }),   { status: 500, headers: { 'Content-Type': 'application/json' } });
+  if (!tavilyKey) return fail(500, 'TAVILY_API_KEY not configured');
+  if (!groqKey)   return fail(500, 'GROQ_API_KEY not configured');
 
   let body;
   try { body = await req.json(); }
-  catch { return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400, headers: { 'Content-Type': 'application/json' } }); }
+  catch { return fail(400, 'Invalid JSON'); }
 
   const { lat, lon, city } = body;
-  if (lat == null || lon == null) {
-    return new Response(JSON.stringify({ error: 'Missing lat/lon' }), {
-      status: 400, headers: { 'Content-Type': 'application/json' },
-    });
-  }
+  if (lat == null || lon == null) return fail(400, 'Missing lat/lon');
 
   const locationLabel = city || `${lat.toFixed(3)},${lon.toFixed(3)}`;
   const todayStr = new Date().toISOString().slice(0, 10);
+  log(`location="${locationLabel}" lat=${lat.toFixed(4)} lon=${lon.toFixed(4)} today=${todayStr}`);
 
   // ── Step 1: Run 3 Tavily searches in parallel ─────────────────────────────
-  // • Recent news (past month) — broad query so we actually get results
-  // • Broader city news (past month) — fallback if district returns little
-  // • Historical/notable — no date limit
   let recentResults = [], cityResults = [], historyResults = [];
   try {
-    // Queries are unquoted so Tavily doesn't need verbatim matches.
-    // All three anchor on both suburb AND city so results stay local.
+    log('Tavily► launching 3 searches for "' + locationLabel + '"');
     [recentResults, cityResults, historyResults] = await Promise.all([
       tavilySearch(`${locationLabel} ${city || ''} news events 2025`.trim(), tavilyKey, 6, 'month'),
       tavilySearch(`${locationLabel} ${city || ''} incident development update`.trim(), tavilyKey, 5, 'month'),
       tavilySearch(`${locationLabel} ${city || ''} history landmark notable`.trim(), tavilyKey, 5, null),
     ]);
+    log(`Tavily► recent=${recentResults.length} city=${cityResults.length} history=${historyResults.length}`);
   } catch (e) {
-    console.error('Tavily search failed:', e.message);
-    // Try one fallback search without time_range in case that was the issue
+    log('Tavily► search failed: ' + e.message);
     try {
       historyResults = await tavilySearch(`${locationLabel} ${city || ''} news events`.trim(), tavilyKey, 8, null);
-    } catch (_) {}
+      log('Tavily► fallback got ' + historyResults.length + ' results');
+    } catch (e2) { log('Tavily► fallback also failed: ' + e2.message); }
   }
 
   // Deduplicate by URL
@@ -114,9 +108,12 @@ export default async function handler(req) {
     seen.add(r.url);
     return true;
   });
+  log(`Tavily► deduped total=${allResults.length} results`);
+  allResults.slice(0, 6).forEach((r, i) => log(`  [${i}] ${(r.title||'').slice(0,60)} | ${r.published_date||'no-date'}`));
 
   if (allResults.length === 0) {
-    return new Response(JSON.stringify({ spots: [] }), {
+    log('Tavily► 0 results after dedup — returning empty spots');
+    return new Response(JSON.stringify({ spots: [], _debug }), {
       status: 200, headers: { 'Content-Type': 'application/json' },
     });
   }
@@ -160,6 +157,7 @@ Return a raw JSON array (no markdown, no backticks):
 
   for (const model of GROQ_MODELS) {
     if (spots) break;
+    log('Groq► trying model=' + model);
     try {
       const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
@@ -176,35 +174,37 @@ Return a raw JSON array (no markdown, no backticks):
       });
 
       const rawBody = await groqRes.text();
+      log('Groq► HTTP ' + groqRes.status + ' body_len=' + rawBody.length);
       if (!groqRes.ok) {
-        console.error(`Groq ${model} HTTP ${groqRes.status}:`, rawBody.slice(0, 200));
-        if (groqRes.status === 401 || groqRes.status === 429) break; // no point retrying
+        log('Groq► error: ' + rawBody.slice(0, 200));
+        if (groqRes.status === 401 || groqRes.status === 429) break;
         continue;
       }
 
       let gdata;
-      try { gdata = JSON.parse(rawBody); } catch (_) { continue; }
+      try { gdata = JSON.parse(rawBody); } catch (_) { log('Groq► failed to parse response JSON'); continue; }
       const text = gdata.choices?.[0]?.message?.content || '';
+      log('Groq► raw content preview: ' + text.slice(0, 120).replace(/\n/g,' '));
       spots = extractJSON(text);
       if (!spots) {
-        console.error(`Llama ${model} JSON parse failed. Raw:`, text.slice(0, 300));
+        log('Groq► JSON extraction failed. Raw: ' + text.slice(0, 300));
         spots = null;
+      } else {
+        log('Groq► parsed ' + spots.length + ' spots from model=' + model);
       }
     } catch (e) {
-      console.error(`Groq fetch error (${model}):`, e.message);
+      log('Groq► fetch error (' + model + '): ' + e.message);
     }
   }
 
   if (!spots || !Array.isArray(spots) || spots.length === 0) {
-    return new Response(JSON.stringify({ spots: [] }), {
+    log('No valid spots after all models');
+    return new Response(JSON.stringify({ spots: [], _debug }), {
       status: 200, headers: { 'Content-Type': 'application/json' },
     });
   }
 
   // ── Step 3: Sanitise ─────────────────────────────────────────────────────
-  // NOTE: We do NOT hard-filter by date here — Tavily's time_range already
-  // scoped the recent searches. Llama may omit dates it can't find; we keep
-  // those spots rather than silently drop them.
   const clean = spots
     .filter(s => s && s.summary && s.lat && s.lon)
     .map(s => ({
@@ -220,7 +220,10 @@ Return a raw JSON array (no markdown, no backticks):
     }))
     .slice(0, 6);
 
-  return new Response(JSON.stringify({ spots: clean }), {
+  log(`Sanitised ${spots.length} → ${clean.length} spots`);
+  clean.forEach((s, i) => log(`  BZ[${i}] cat=${s.category} date=${s.date||'null'} "${s.name.slice(0,30)}"`));
+
+  return new Response(JSON.stringify({ spots: clean, _debug }), {
     status: 200,
     headers: {
       'Content-Type': 'application/json',
