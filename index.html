@@ -9,6 +9,7 @@
 <title>Lenz — See What's Around You</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,700;12..96,800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script defer src="/_vercel/insights/script.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
@@ -1114,13 +1115,21 @@
 <!-- Filter bar -->
 <div id="filter-bar"></div>
 
-<!-- Debug toggle -->
-<button id="debug-toggle" style="position:fixed;bottom:40px;right:20px;background:rgba(8,8,14,0.88);color:rgba(255,255,255,0.4);border:0.5px solid rgba(255,255,255,0.12);border-radius:50px;font-size:11.5px;padding:8px 14px;cursor:pointer;z-index:15;font-family:inherit;display:none;">🔍 Debug</button>
-
 <!-- Debug panel -->
 <div id="debug-panel" style="display:none;position:fixed;top:80px;left:10px;right:10px;bottom:auto;max-height:55vh;overflow-y:auto;background:rgba(0,0,0,0.94);color:#00ff88;font-family:monospace;font-size:11px;line-height:1.6;padding:12px 14px;border-radius:12px;z-index:80;border:0.5px solid rgba(0,255,136,0.25);white-space:pre-wrap;word-break:break-all;"></div>
 
 <script>
+// ─────────────────────────────────────────────
+//  Analytics helper (Vercel Web Analytics)
+// ─────────────────────────────────────────────
+function track(eventName, props){
+  try {
+    if(typeof window.va === 'function'){
+      window.va('event', { name: eventName, ...(props || {}) });
+    }
+  } catch(e){ /* never block on analytics */ }
+}
+
 // ─────────────────────────────────────────────
 //  State
 // ─────────────────────────────────────────────
@@ -1328,6 +1337,7 @@ function handleFilterTap(fid){
       state_filters.add(fid);
     }
   }
+  track('filter_changed', { filter: fid });
   filterBar.querySelectorAll('.filter-chip').forEach(chip => {
     chip.classList.toggle('active', state_filters.has(chip.dataset.fid));
   });
@@ -1987,7 +1997,7 @@ async function launchApp(){
   state.ready = true;
   refreshBtn.style.display = 'flex';
   showFilterBar();
-  document.getElementById('debug-toggle').style.display = 'block';
+  track('app_launched', { mode: 'real' });
   if(!_rafRunning){ _rafRunning = true; requestAnimationFrame(renderLoop); }
 
   startGPSWatch();
@@ -2012,7 +2022,7 @@ function startDemo(){
   state.ready = true;
   refreshBtn.style.display = 'flex';
   showFilterBar();
-  document.getElementById('debug-toggle').style.display = 'block';
+  track('app_launched', { mode: 'demo' });
   dbg('Demo mode ready');
   if(!_rafRunning){ _rafRunning = true; requestAnimationFrame(renderLoop); }
 }
@@ -2545,6 +2555,7 @@ function openPanel(place){
   const tags = place.tags;
 
   if(place.isRental){
+    track('spot_tapped', { name: place.name, category: 'rental', distance_m: Math.round(place.dist) });
     document.getElementById('panel-category').textContent = '🏠 RENTAL · ' + (place.type||'APARTMENT').toUpperCase();
     document.getElementById('panel-name').textContent = place.name;
     document.getElementById('panel-dist').textContent = formatDist(place.dist) + ' away';
@@ -2567,6 +2578,7 @@ function openPanel(place){
   }
 
   if(place.isBazinga){
+    track('bazinga_spot_tapped', { category: place.category || 'News', has_url: !!place.url });
     document.getElementById('panel-category').textContent = '⚡ BAZINGA · ' + (place.category||'News').toUpperCase();
     document.getElementById('panel-name').textContent = place.headline || place.name;
     document.getElementById('panel-dist').textContent = formatDist(place.dist) + ' away';
@@ -2662,6 +2674,7 @@ function openPanel(place){
   if(perks.length) makeRow('✨', perks.join(' · '));
 
   loadHeritageGuide(place);
+  track('spot_tapped', { name: place.name, category: formatCategory(tags), distance_m: Math.round(place.dist) });
 
   // Directions button
   const dirBtn = document.getElementById('directions-btn');
@@ -2866,17 +2879,6 @@ async function fetchBazingaPlaces(lat, lon) {
 try {
   Object.keys(sessionStorage).filter(k => k.startsWith('arplaces_') && !k.startsWith('arplaces_v')).forEach(k => sessionStorage.removeItem(k));
 } catch(_) {}
-
-// Debug toggle
-(function(){
-  const btn = document.getElementById('debug-toggle');
-  const panel = document.getElementById('debug-panel');
-  btn.addEventListener('click', function(){
-    const visible = panel.style.display !== 'none';
-    panel.style.display = visible ? 'none' : 'block';
-    btn.textContent = visible ? '🔍 Debug' : '❌ Close';
-  });
-})();
 
 let currentRadius = MAX_DIST;
 refreshBtn.addEventListener('click', async () => {
