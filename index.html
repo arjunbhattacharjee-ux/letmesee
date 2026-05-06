@@ -2820,12 +2820,33 @@ async function fetchRentalPlaces(lat, lon) {
 
 async function fetchBazingaPlaces(lat, lon) {
   try {
-    const city = await getCurrentCity(lat, lon);
-    dbg('Bazinga fetch: ' + (city || lat.toFixed(3)+','+lon.toFixed(3)));
-    const res = await fetch('/api/bazinga', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ lat, lon, city }) });
-    if(!res.ok){ dbg('Bazinga API error: ' + res.status); return; }
+    const cityResult = await getCurrentCity(lat, lon);
+    const city    = String(cityResult);
+    const suburb  = cityResult._suburb  || '';
+    const country = cityResult._country || '';
+    const locality = [suburb, city].filter(Boolean).join(', ');
+    dbg('Bazinga► loc="' + locality + '" suburb="' + suburb + '" country="' + country + '"');
+    const payload = { lat, lon, city };
+    dbg('Bazinga► POST /api/bazinga ' + JSON.stringify(payload).slice(0, 120));
+    const res = await fetch('/api/bazinga', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    dbg('Bazinga► HTTP ' + res.status + ' ' + res.statusText);
+    if(!res.ok){
+      const errText = await res.text().catch(()=>'');
+      dbg('Bazinga► error body: ' + errText.slice(0, 200));
+      return;
+    }
     const data = await res.json();
-    if(!Array.isArray(data.spots) || !data.spots.length){ dbg('Bazinga: no spots'); return; }
+    dbg('Bazinga► response keys: ' + Object.keys(data).join(', '));
+    if(data._debug) data._debug.forEach(line => dbg('SRV: ' + line));
+    if(!Array.isArray(data.spots) || !data.spots.length){
+      dbg('Bazinga► 0 spots — raw: ' + JSON.stringify(data).slice(0, 300));
+      return;
+    }
+    dbg('Bazinga► got ' + data.spots.length + ' spots');
     state.bazingaPlaces = data.spots.map((s,i) => ({
       id: 'bz_'+i, isBazinga: true,
       name: s.name || s.headline || 'Local Update',
@@ -2837,8 +2858,9 @@ async function fetchBazingaPlaces(lat, lon) {
       dist: haversine(lat, lon, s.lat, s.lon),
       tags: {},
     }));
-    dbg('Bazinga loaded: ' + state.bazingaPlaces.length + ' spots');
-  } catch(e) { dbg('fetchBazingaPlaces: ' + e.message); }
+    dbg('Bazinga► loaded ' + state.bazingaPlaces.length + ' spots');
+    state.bazingaPlaces.forEach((s,i) => dbg('BZ['+i+'] cat='+s.category+' dist='+Math.round(s.dist)+'m date='+(s.date||'null')+' "'+s.name.slice(0,28)+'"'));
+  } catch(e) { dbg('fetchBazingaPlaces: ' + e.message + (e.stack ? '\n'+e.stack.slice(0,200) : '')); }
 }
 
 try {
