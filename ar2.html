@@ -1,0 +1,2924 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0a0a0f">
+<title>Lenz — See What's Around You</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,700;12..96,800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  :root {
+    --accent:      #FF3B30;
+    --accent2:     #FF9F0A;
+    --blue:        #0A84FF;
+    --green:       #30D158;
+    --purple:      #BF5AF2;
+    --glass:       rgba(8,8,14,0.78);
+    --glass-light: rgba(255,255,255,0.07);
+    --glass-mid:   rgba(255,255,255,0.12);
+    --text:        #FFFFFF;
+    --text-dim:    rgba(255,255,255,0.48);
+    --text-mid:    rgba(255,255,255,0.72);
+    --border:      rgba(255,255,255,0.10);
+    --border-mid:  rgba(255,255,255,0.18);
+    --radius:      20px;
+    --radius-sm:   12px;
+    --font-display: 'Syne', sans-serif;
+    --font:        'DM Sans', 'Helvetica Neue', sans-serif;
+    --shadow:      0 8px 32px rgba(0,0,0,0.5);
+  }
+
+  html, body {
+    width: 100%; height: 100%;
+    background: #000;
+    font-family: var(--font);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+  body.app-ready {
+    overflow: hidden;
+    touch-action: none;
+  }
+
+  /* ── Camera ── */
+  #video {
+    position: fixed; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+  }
+
+  /* ── AR canvas ── */
+  #ar-canvas {
+    position: fixed; inset: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+  }
+
+  /* ── Dot hit targets ── */
+  #dot-layer {
+    position: fixed; inset: 0;
+    width: 100%; height: 100%;
+  }
+  .dot-hit {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    width: 60px; height: 60px;
+    border-radius: 50%;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* ── Crosshair ── */
+  #crosshair {
+    position: fixed; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 28px; height: 28px;
+    pointer-events: none;
+    z-index: 5; opacity: 0.35;
+  }
+  #crosshair::before, #crosshair::after {
+    content: ''; position: absolute; background: rgba(255,255,255,0.8);
+    border-radius: 1px;
+  }
+  #crosshair::before { width: 1.5px; height: 100%; left: 50%; top: 0; transform: translateX(-50%); }
+  #crosshair::after  { width: 100%; height: 1.5px; top: 50%; left: 0; transform: translateY(-50%); }
+  #crosshair-dot {
+    position: fixed; top: 50%; left: 50%;
+    width: 5px; height: 5px;
+    background: #fff;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 5; opacity: 0.5;
+  }
+
+  /* ── HUD top bar ── */
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0;
+    padding: calc(env(safe-area-inset-top, 16px) + 12px) 20px 16px;
+    display: flex; align-items: center; justify-content: space-between;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.65) 0%, transparent 100%);
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  #app-brand {
+    display: flex; align-items: center; gap: 9px;
+  }
+  #app-logo {
+    width: 34px; height: 34px;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 17px;
+    flex-shrink: 0;
+    box-shadow: 0 2px 12px rgba(255,59,48,0.4);
+  }
+  #app-title {
+    font-family: var(--font-display);
+    font-size: 20px; font-weight: 700;
+    letter-spacing: -0.3px;
+    line-height: 1;
+  }
+  #app-title span { color: #34d399; }
+
+  #hud-right {
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  #gps-indicator {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 11px; font-weight: 500;
+    padding: 5px 11px; border-radius: 20px;
+    background: var(--glass);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 0.5px solid var(--border);
+  }
+  #gps-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--text-dim);
+    transition: background 0.4s;
+  }
+  #gps-dot.locked { background: var(--green); box-shadow: 0 0 6px rgba(48,209,88,0.6); }
+  #gps-dot.searching { background: var(--accent2); animation: gpspulse 1.2s ease-in-out infinite; }
+  @keyframes gpspulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  #status-pill {
+    font-size: 11.5px; font-weight: 500;
+    padding: 5px 13px; border-radius: 20px;
+    background: var(--glass);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 0.5px solid var(--border);
+    pointer-events: none;
+    color: var(--text-mid);
+    max-width: 160px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* ── Compass ── */
+  #compass-wrap {
+    position: fixed; bottom: 130px; right: 18px;
+    width: 56px; height: 56px;
+    z-index: 10;
+    filter: drop-shadow(0 4px 12px rgba(0,0,0,0.5));
+  }
+  #compass-svg { width: 100%; height: 100%; transition: transform 0.12s ease; }
+
+  /* ── Count badge ── */
+  #count-badge {
+    position: fixed; bottom: 130px; left: 18px;
+    background: var(--glass);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 0.5px solid var(--border);
+    border-radius: 16px;
+    padding: 10px 16px;
+    z-index: 10;
+    box-shadow: var(--shadow);
+  }
+  #count-badge strong {
+    font-family: var(--font-display);
+    color: var(--text); font-size: 22px;
+    font-weight: 700; display: block;
+    line-height: 1;
+  }
+  #count-label { font-size: 11px; color: var(--text-dim); margin-top: 2px; font-weight: 400; }
+
+  /* ── Splash screen ── */
+  /* ── Splash / Landing ── */
+  #splash {
+    position: fixed; inset: 0;
+    background: #06060a;
+    overflow-y: scroll;          /* 'scroll' not 'auto' — forces momentum on iOS */
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    z-index: 100;
+  }
+  #splash::-webkit-scrollbar { display: none; }
+
+  /* Noise grain texture */
+  #splash::before {
+    content: '';
+    position: absolute; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+    opacity: 0.025; pointer-events: none; z-index: 0;
+    min-height: 100%;
+  }
+
+  /* Radial glow at top */
+  #splash::after {
+    content: '';
+    position: fixed; top: 0; left: 50%; transform: translateX(-50%);
+    width: 500px; height: 380px;
+    background: radial-gradient(ellipse at 50% 0%, rgba(52,211,153,0.10) 0%, transparent 68%);
+    pointer-events: none; z-index: 0;
+  }
+
+  @keyframes orbpulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.7;transform:scale(0.9)} }
+
+  .splash-inner {
+    position: relative; z-index: 1;
+    width: 100%;
+    max-width: 420px;
+    margin: 0 auto;
+    /* min-height must exceed viewport so iOS allows scrolling */
+    min-height: calc(100vh + 1px);
+    padding: calc(env(safe-area-inset-top, 20px) + 28px) 28px calc(env(safe-area-inset-bottom, 20px) + 60px);
+    display: flex; flex-direction: column;
+    align-items: center;
+  }
+
+  /* — top badge — */
+  .splash-top-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(255,255,255,0.06);
+    border: 0.5px solid rgba(255,255,255,0.13);
+    border-radius: 50px;
+    padding: 6px 14px 6px 8px;
+    font-size: 11.5px; font-weight: 500;
+    color: rgba(255,255,255,0.45);
+    letter-spacing: 0.2px;
+    margin-bottom: 24px;
+    animation: fadeUp 0.6s ease both;
+  }
+  .splash-top-badge-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #34d399;
+    box-shadow: 0 0 8px rgba(52,211,153,0.7);
+    animation: blink 2.4s ease-in-out infinite;
+  }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.35} }
+
+  /* — wordmark — */
+  .splash-wordmark {
+    font-family: 'Bricolage Grotesque', 'Syne', sans-serif;
+    font-size: 68px; font-weight: 800;
+    letter-spacing: -4px; line-height: 0.92;
+    color: #fff;
+    text-align: center;
+    margin-bottom: 10px;
+    animation: fadeUp 0.6s 0.08s ease both;
+    position: relative;
+  }
+  .splash-wordmark .accent-dot {
+    display: inline-block;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: linear-gradient(135deg, #34d399, #06b6d4);
+    margin-left: 3px;
+    vertical-align: super;
+    box-shadow: 0 0 20px rgba(52,211,153,0.5);
+    animation: orbpulse 3s ease-in-out infinite;
+  }
+
+  /* — tagline — */
+  .splash-tagline {
+    font-family: 'Bricolage Grotesque', 'Syne', sans-serif;
+    font-size: 17px; font-weight: 400;
+    color: rgba(255,255,255,0.42);
+    letter-spacing: -0.2px;
+    text-align: center;
+    margin-bottom: 28px;
+    line-height: 1.55;
+    max-width: 280px;
+    animation: fadeUp 0.6s 0.14s ease both;
+  }
+
+  /* — visual mockup strip — */
+  .splash-phone-strip {
+    width: 100%; max-width: 340px;
+    margin-bottom: 32px;
+    animation: fadeUp 0.6s 0.36s ease both;
+    position: relative;
+  }
+  .splash-phone-frame {
+    width: 100%;
+    background: rgba(255,255,255,0.04);
+    border: 0.5px solid rgba(255,255,255,0.1);
+    border-radius: 24px;
+    overflow: hidden;
+    position: relative;
+    /* aspect-ratio fallback for older Safari < 15 */
+    padding-bottom: 56.25%; /* 16:9 */
+    height: 0;
+  }
+  @supports (aspect-ratio: 16/9) {
+    .splash-phone-frame {
+      aspect-ratio: 16/9;
+      padding-bottom: 0;
+      height: auto;
+    }
+  }
+  .splash-phone-frame > * {
+    position: absolute;
+    inset: 0;
+  }
+  /* Simulated AR view inside frame */
+  .splash-ar-bg {
+    position: absolute; inset: 0;
+    background: linear-gradient(135deg, #0a0f1a 0%, #0d1a2e 40%, #06111e 100%);
+    overflow: hidden;
+  }
+  /* Animated scan lines */
+  .splash-ar-bg::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 3px,
+      rgba(52,211,153,0.018) 3px,
+      rgba(52,211,153,0.018) 4px
+    );
+    pointer-events: none;
+  }
+  /* Horizon line */
+  .splash-ar-bg::after {
+    content: '';
+    position: absolute; top: 50%; left: 0; right: 0; height: 0.5px;
+    background: linear-gradient(90deg, transparent, rgba(52,211,153,0.25), transparent);
+  }
+
+  .ar-dot-cluster {
+    position: absolute; inset: 0;
+    pointer-events: none;
+  }
+  .ar-pip {
+    position: absolute;
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    animation: pipFloat var(--dur, 4s) ease-in-out infinite;
+    animation-delay: var(--del, 0s);
+  }
+  .ar-pip-bubble {
+    width: var(--sz,36px); height: var(--sz,36px);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: calc(var(--sz,36px) * 0.45);
+    border: 1.5px solid rgba(255,255,255,0.2);
+    /* background-color set inline per-pip; iOS Safari rejects rgba(var(--cr),0.18) */
+    background-color: rgba(52,211,153,0.18);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    box-shadow: 0 0 14px rgba(52,211,153,0.25);
+  }
+  .ar-pip-label {
+    background: rgba(0,0,0,0.65);
+    border-radius: 6px; padding: 2px 7px;
+    font-size: 8.5px; font-weight: 600; color: rgba(255,255,255,0.85);
+    white-space: nowrap;
+  }
+  .ar-pip-price {
+    background: rgba(52,211,153,0.15);
+    border: 0.5px solid rgba(52,211,153,0.3);
+    border-radius: 6px; padding: 2px 7px;
+    font-size: 8px; font-weight: 500; color: #34d399;
+    white-space: nowrap;
+  }
+  @keyframes pipFloat {
+    0%,100% { transform: translateY(0px); }
+    50%      { transform: translateY(-5px); }
+  }
+
+  /* Crosshair overlay */
+  .ar-crosshair {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 22px; height: 22px; opacity: 0.3;
+  }
+  .ar-crosshair::before, .ar-crosshair::after {
+    content: ''; position: absolute; background: rgba(52,211,153,0.8); border-radius: 1px;
+  }
+  .ar-crosshair::before { width: 1px; height: 100%; left: 50%; top: 0; }
+  .ar-crosshair::after  { width: 100%; height: 1px; top: 50%; left: 0; }
+
+  /* Corner brackets */
+  .ar-corner {
+    position: absolute; width: 14px; height: 14px;
+    border-color: rgba(52,211,153,0.5); border-style: solid;
+    opacity: 0.7;
+  }
+  .ar-corner-tl { top: 8px; left: 8px; border-width: 1.5px 0 0 1.5px; }
+  .ar-corner-tr { top: 8px; right: 8px; border-width: 1.5px 1.5px 0 0; }
+  .ar-corner-bl { bottom: 8px; left: 8px; border-width: 0 0 1.5px 1.5px; }
+  .ar-corner-br { bottom: 8px; right: 8px; border-width: 0 1.5px 1.5px 0; }
+
+  /* Heading badge */
+  .ar-heading {
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,0.6); border: 0.5px solid rgba(255,255,255,0.12);
+    border-radius: 20px; padding: 3px 10px;
+    font-family: 'DM Mono', monospace;
+    font-size: 9px; color: rgba(255,255,255,0.5);
+    letter-spacing: 1px;
+  }
+
+  /* — use-case pills — */
+  .splash-uses {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    justify-content: center;
+    margin-bottom: 32px;
+    animation: fadeUp 0.6s 0.40s ease both;
+  }
+  .use-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(255,255,255,0.05);
+    border: 0.5px solid rgba(255,255,255,0.10);
+    border-radius: 50px;
+    padding: 7px 14px;
+    font-size: 12.5px; font-weight: 500;
+    color: rgba(255,255,255,0.65);
+    letter-spacing: -0.1px;
+  }
+
+  /* — how it works — */
+  .splash-steps {
+    width: 100%;
+    margin-bottom: 40px;
+    animation: fadeUp 0.6s 0.44s ease both;
+  }
+  .steps-label {
+    font-size: 10px; font-weight: 600;
+    letter-spacing: 2.5px; text-transform: uppercase;
+    color: rgba(255,255,255,0.22);
+    margin-bottom: 16px;
+    text-align: center;
+  }
+  .steps-list {
+    display: flex; flex-direction: column; gap: 1px;
+    background: rgba(255,255,255,0.07);
+    border-radius: 18px;
+    overflow: hidden;
+    border: 0.5px solid rgba(255,255,255,0.08);
+  }
+  .step-row {
+    display: flex; align-items: center; gap: 14px;
+    background: rgba(8,8,16,0.9);
+    padding: 16px 18px;
+  }
+  .step-num {
+    width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(52,211,153,0.12);
+    border: 0.5px solid rgba(52,211,153,0.3);
+    font-family: 'DM Mono', monospace;
+    font-size: 12px; font-weight: 500;
+    color: #34d399;
+  }
+  .step-text { flex: 1; }
+  .step-title {
+    font-size: 14px; font-weight: 600;
+    color: rgba(255,255,255,0.88);
+    letter-spacing: -0.2px;
+    line-height: 1.3;
+    margin-bottom: 2px;
+  }
+  .step-sub {
+    font-size: 12px; font-weight: 400;
+    color: rgba(255,255,255,0.38);
+    line-height: 1.4;
+  }
+  .step-icon { font-size: 20px; flex-shrink: 0; }
+
+  /* — CTA buttons — */
+  .splash-cta {
+    width: 100%;
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    animation: fadeUp 0.6s 0.22s ease both;
+    margin-bottom: 16px;
+  }
+  .btn-primary {
+    width: 100%;
+    background: #fff;
+    color: #06060a;
+    border: none;
+    font-family: 'Bricolage Grotesque', var(--font);
+    font-size: 16px; font-weight: 700;
+    letter-spacing: -0.3px;
+    padding: 17px 36px; border-radius: 50px;
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.2s, background 0.2s;
+    box-shadow: 0 0 0 0 rgba(255,255,255,0);
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  .btn-primary:active { transform: scale(0.97); }
+
+  .btn-secondary {
+    background: transparent;
+    color: rgba(255,255,255,0.38);
+    border: 0.5px solid rgba(255,255,255,0.12);
+    font-family: var(--font);
+    font-size: 14px; font-weight: 500;
+    padding: 13px 28px; border-radius: 50px;
+    cursor: pointer; width: 100%;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .btn-secondary:active { color: rgba(255,255,255,0.7); border-color: rgba(255,255,255,0.25); }
+
+  /* — legal — */
+  .splash-legal {
+    font-size: 11px; color: rgba(255,255,255,0.16);
+    text-align: center;
+    line-height: 1.6;
+    animation: fadeUp 0.6s 0.28s ease both;
+    margin-bottom: 32px;
+  }
+
+  /* — section divider — */
+  .splash-divider {
+    width: 100%;
+    height: 0.5px;
+    background: rgba(255,255,255,0.07);
+    margin-bottom: 32px;
+    animation: fadeUp 0.6s 0.32s ease both;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── Loading overlay ── */
+  #loading-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.55);
+    display: none; align-items: center; justify-content: center;
+    flex-direction: column; gap: 16px;
+    z-index: 90;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+  #loading-overlay.active { display: flex; }
+
+  .loading-card {
+    background: var(--glass);
+    border: 0.5px solid var(--border-mid);
+    border-radius: 20px;
+    padding: 28px 36px;
+    display: flex; flex-direction: column;
+    align-items: center; gap: 14px;
+    box-shadow: var(--shadow);
+  }
+  .loading-logo {
+    width: 48px; height: 48px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px;
+  }
+  .loading-title {
+    font-family: var(--font-display);
+    font-size: 16px; font-weight: 700;
+    letter-spacing: -0.3px;
+  }
+  .spinner {
+    width: 28px; height: 28px;
+    border: 2.5px solid rgba(255,255,255,0.12);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.75s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-sub {
+    font-size: 12px; color: var(--text-dim);
+    text-align: center;
+  }
+
+  /* ── Info panel ── */
+  #info-panel {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: var(--glass);
+    backdrop-filter: blur(28px);
+    -webkit-backdrop-filter: blur(28px);
+    border-top: 0.5px solid var(--border-mid);
+    border-radius: 24px 24px 0 0;
+    padding: 0 20px;
+    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+    z-index: 50;
+    transform: translateY(100%);
+    transition: transform 0.4s cubic-bezier(0.32, 0.72, 0, 1);
+    max-height: 82vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    box-shadow: 0 -8px 40px rgba(0,0,0,0.6);
+  }
+  #info-panel.open { transform: translateY(0); }
+  #info-panel::-webkit-scrollbar { display: none; }
+
+  .panel-handle {
+    width: 38px; height: 4px;
+    background: rgba(255,255,255,0.2);
+    border-radius: 2px;
+    margin: 14px auto 20px;
+  }
+
+  .close-btn {
+    position: absolute; top: 18px; right: 18px;
+    width: 32px; height: 32px;
+    background: var(--glass-light);
+    border: 0.5px solid var(--border);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; color: var(--text-dim);
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .close-btn:active { background: var(--glass-mid); }
+
+  #panel-category {
+    font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 2px;
+    color: var(--accent);
+    margin-bottom: 6px;
+    opacity: 0.8;
+  }
+
+  #panel-name {
+    font-family: var(--font-display);
+    font-size: 28px; font-weight: 700;
+    letter-spacing: -0.8px; line-height: 1.1;
+    margin-bottom: 16px;
+    padding-right: 44px;
+  }
+
+  .panel-meta-row {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 20px; flex-wrap: wrap;
+  }
+
+  .dist-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: rgba(255,255,255,0.08);
+    border: 0.5px solid rgba(255,255,255,0.14);
+    color: var(--text-mid);
+    font-size: 12px; font-weight: 600;
+    padding: 5px 13px; border-radius: 20px;
+    letter-spacing: 0.1px;
+  }
+
+  .tag {
+    font-size: 11px; font-weight: 500;
+    padding: 4px 11px; border-radius: 20px;
+    background: transparent;
+    border: 0.5px solid rgba(255,255,255,0.12);
+    color: var(--text-dim);
+    text-transform: capitalize;
+  }
+
+  /* Action buttons */
+  .panel-actions {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 22px;
+  }
+  .action-btn {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 5px;
+    background: rgba(255,255,255,0.06);
+    border: 0.5px solid rgba(255,255,255,0.10);
+    border-radius: 14px;
+    padding: 14px 8px;
+    cursor: pointer;
+    font-family: var(--font);
+    transition: background 0.15s;
+    text-decoration: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .action-btn:active { background: rgba(255,255,255,0.11); }
+  .action-btn-icon { font-size: 19px; line-height: 1; }
+  .action-btn-label { font-size: 11px; font-weight: 500; color: var(--text-dim); }
+  .action-btn.primary-action {
+    background: var(--blue);
+    border-color: transparent;
+    box-shadow: 0 4px 20px rgba(10,132,255,0.28);
+  }
+  .action-btn.primary-action .action-btn-label { color: rgba(255,255,255,0.85); }
+  .action-btn.primary-action .action-btn-icon { font-size: 20px; }
+
+  /* Divider */
+  .panel-divider {
+    height: 0.5px;
+    background: rgba(255,255,255,0.08);
+    margin: 2px 0 18px;
+  }
+
+  /* Info rows */
+  .panel-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 0;
+    border-bottom: 0.5px solid rgba(255,255,255,0.07);
+  }
+  .panel-row:last-child { border-bottom: none; }
+  .panel-icon {
+    font-size: 16px; width: 20px;
+    text-align: center; flex-shrink: 0;
+    opacity: 0.6;
+  }
+  .panel-val {
+    color: var(--text-mid); font-weight: 400;
+    font-size: 13.5px; line-height: 1.4;
+  }
+  .stars { color: var(--accent2); letter-spacing: 2px; font-size: 13px; }
+
+  /* ── Panel rows ── */
+  .panel-link {
+    color: var(--blue);
+    text-decoration: none;
+    font-size: 13.5px;
+  }
+
+  /* ── AI summary section (no header, seamless) ── */
+  #heritage-card {
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 0.5px solid var(--border);
+    display: none;
+  }
+  #heritage-card.visible { display: block; }
+
+  /* hide the old header entirely */
+  .heritage-header { display: none; }
+  .heritage-powered { display: none; }
+  .heritage-badge   { display: none; }
+
+  #heritage-summary {
+    font-size: 14px; line-height: 1.72;
+    color: rgba(255,255,255,0.78);
+    margin-bottom: 14px;
+    font-weight: 300;
+    font-style: italic;
+  }
+
+  .heritage-facts { display: flex; flex-direction: column; gap: 7px; }
+  .heritage-fact {
+    display: flex; gap: 10px; align-items: flex-start;
+    padding: 9px 0;
+    border-top: 0.5px solid rgba(255,255,255,0.06);
+  }
+  .heritage-fact-icon { font-size: 14px; flex-shrink: 0; opacity: 0.7; margin-top: 2px; }
+  .heritage-fact-text {
+    font-size: 12.5px; color: rgba(255,255,255,0.6);
+    line-height: 1.55; font-weight: 300;
+  }
+
+  .heritage-loading {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 12px; color: rgba(255,255,255,0.3);
+    padding: 2px 0;
+  }
+  .heritage-spinner {
+    width: 14px; height: 14px; flex-shrink: 0;
+    border: 1.5px solid rgba(255,255,255,0.1);
+    border-top-color: rgba(255,255,255,0.5);
+    border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+  }
+
+  #heritage-wiki-link {
+    display: none; align-items: center; gap: 5px;
+    margin-top: 14px;
+    font-size: 12px; color: var(--blue);
+    text-decoration: none; font-weight: 500;
+    opacity: 0.8;
+    transition: opacity 0.15s;
+  }
+  #heritage-wiki-link:hover { opacity: 1; }
+
+  /* ── Calibration toast ── */
+  #calib-toast {
+    position: fixed; top: 78px; left: 50%; transform: translateX(-50%);
+    background: var(--glass);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 0.5px solid var(--border-mid);
+    border-radius: 50px;
+    padding: 10px 20px;
+    font-size: 12.5px; color: var(--text-mid);
+    white-space: nowrap; z-index: 20;
+    opacity: 0; transition: opacity 0.3s;
+    pointer-events: none;
+    box-shadow: var(--shadow);
+  }
+  #calib-toast.show { opacity: 1; }
+
+  /* ── Refresh button ── */
+  #refresh-btn {
+    position: fixed; bottom: 104px; left: 50%; transform: translateX(-50%);
+    background: var(--glass);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 0.5px solid var(--border-mid);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 13.5px; font-weight: 500;
+    padding: 12px 26px; border-radius: 50px;
+    cursor: pointer; z-index: 10;
+    display: flex; align-items: center; gap: 8px;
+    transition: opacity 0.15s, transform 0.1s;
+    white-space: nowrap;
+    box-shadow: var(--shadow);
+  }
+  #refresh-btn:active { opacity: 0.7; transform: translateX(-50%) scale(0.97); }
+
+  /* ── Filter bar ── */
+  #filter-bar {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    padding: 12px 16px;
+    padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+    background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.5) 70%, transparent 100%);
+    display: none;
+    flex-direction: row; gap: 8px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    z-index: 12;
+    pointer-events: all;
+  }
+  #filter-bar::-webkit-scrollbar { display: none; }
+
+  .filter-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    flex-shrink: 0;
+    background: var(--glass);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 0.5px solid var(--border-mid);
+    border-radius: 50px;
+    padding: 8px 15px;
+    font-family: var(--font);
+    font-size: 12.5px; font-weight: 500;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: background 0.18s, color 0.18s, border-color 0.18s, transform 0.1s;
+    white-space: nowrap;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+  .filter-chip .chip-emoji { font-size: 14px; }
+  .filter-chip.active {
+    background: var(--chip-color, var(--accent));
+    border-color: transparent;
+    color: #fff;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+  }
+  .filter-chip:active { transform: scale(0.95); }
+
+  /* ── Error toast ── */
+  .error-toast-inner {
+    background: rgba(255,59,48,0.18);
+    border: 0.5px solid rgba(255,59,48,0.35);
+    border-radius: 14px;
+    padding: 13px 18px;
+    font-size: 13px;
+    color: var(--text-mid);
+    line-height: 1.5;
+    max-width: 320px;
+    text-align: center;
+    box-shadow: var(--shadow);
+  }
+</style>
+</head>
+<body>
+
+<!-- Camera -->
+<video id="video" autoplay playsinline webkit-playsinline muted></video>
+
+<!-- AR overlay -->
+<canvas id="ar-canvas"></canvas>
+
+<!-- Tap targets -->
+<div id="dot-layer"></div>
+
+<!-- Crosshair -->
+<div id="crosshair"></div>
+<div id="crosshair-dot"></div>
+
+<!-- HUD -->
+<div id="hud">
+  <div id="app-brand">
+    <div id="app-logo">🔍</div>
+    <div id="app-title">Len<span>z</span></div>
+  </div>
+  <div id="hud-right">
+    <div id="gps-indicator">
+      <div id="gps-dot"></div>
+      <span id="gps-label">GPS</span>
+    </div>
+    <div id="status-pill">Starting…</div>
+  </div>
+</div>
+
+<!-- Compass -->
+<div id="compass-wrap">
+  <svg id="compass-svg" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="28" cy="28" r="27" fill="rgba(8,8,14,0.72)" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+    <text x="28" y="12"  text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.45)" font-family="DM Sans,sans-serif" font-weight="600">N</text>
+    <text x="28" y="50"  text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.3)"  font-family="DM Sans,sans-serif">S</text>
+    <text x="10" y="31.5" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.3)"  font-family="DM Sans,sans-serif">W</text>
+    <text x="47" y="31.5" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.3)"  font-family="DM Sans,sans-serif">E</text>
+    <polygon id="compass-needle-n" points="28,9 25,28 31,28" fill="#FF3B30" opacity="0.95"/>
+    <polygon id="compass-needle-s" points="28,47 25,28 31,28" fill="rgba(255,255,255,0.25)"/>
+    <circle cx="28" cy="28" r="3.5" fill="#fff" opacity="0.9"/>
+  </svg>
+</div>
+
+<!-- Count badge -->
+<div id="count-badge">
+  <strong id="place-count">0</strong>
+  <div id="count-label">nearby places</div>
+</div>
+
+<!-- Info panel -->
+<div id="info-panel">
+  <div class="panel-handle"></div>
+  <div class="close-btn" id="close-panel">✕</div>
+  <div id="panel-category"></div>
+  <div id="panel-name"></div>
+
+  <div class="panel-meta-row">
+    <div class="dist-badge"><span>📍</span><span id="panel-dist"></span></div>
+    <div class="tag-row" id="panel-tags" style="display:contents"></div>
+  </div>
+
+  <!-- Action buttons -->
+  <div class="panel-actions" id="panel-actions">
+    <button class="action-btn primary-action" id="directions-btn">
+      <span class="action-btn-icon">🗺</span>
+      <span class="action-btn-label">Directions</span>
+    </button>
+    <button class="action-btn" id="share-btn">
+      <span class="action-btn-icon">↑</span>
+      <span class="action-btn-label">Share</span>
+    </button>
+    <a class="action-btn" id="maps-btn" href="#" target="_blank" rel="noopener">
+      <span class="action-btn-icon">🌐</span>
+      <span class="action-btn-label">Maps</span>
+    </a>
+  </div>
+
+  <div class="panel-divider"></div>
+  <div id="panel-rows"></div>
+
+  <!-- AI summary — no header, seamless -->
+  <div id="heritage-card">
+    <div class="heritage-header"><span class="heritage-badge" id="guide-badge"></span><span class="heritage-powered"></span></div>
+    <div id="heritage-summary"></div>
+    <div class="heritage-facts" id="heritage-facts"></div>
+    <a id="heritage-wiki-link" href="#" target="_blank" rel="noopener noreferrer" style="display:none"></a>
+  </div>
+</div>
+
+<!-- Loading overlay -->
+<div id="loading-overlay">
+  <div class="loading-card">
+    <div class="loading-logo">🔍</div>
+    <div class="loading-title">Lenz</div>
+    <div class="spinner"></div>
+    <div class="loading-sub">Discovering nearby places…</div>
+  </div>
+</div>
+
+<!-- Splash / Landing -->
+<div id="splash">
+  <div class="splash-inner">
+
+    <!-- Live indicator badge -->
+    <div class="splash-top-badge">
+      <div class="splash-top-badge-dot"></div>
+      Point. Tap. Explore.
+    </div>
+
+    <!-- Wordmark -->
+    <div class="splash-wordmark">Lenz<span class="accent-dot"></span></div>
+    <div class="splash-tagline">Your phone's camera becomes a live guide to everything around you</div>
+
+    <!-- CTA — above fold, always visible -->
+    <div class="splash-cta">
+      <button class="btn-primary" id="start-btn">
+        <span>📍</span> Start Exploring
+      </button>
+      <button class="btn-secondary" id="demo-btn">Try Without Camera</button>
+    </div>
+
+    <div class="splash-legal">Camera · GPS · Compass · No account needed</div>
+
+    <!-- Divider -->
+    <div class="splash-divider"></div>
+
+    <!-- Simulated AR preview -->
+    <div class="splash-phone-strip">
+      <div class="splash-phone-frame">
+        <div class="splash-ar-bg"></div>
+        <div class="ar-dot-cluster">
+          <!-- Food pip — orange #FF9F0A -->
+          <div class="ar-pip" style="left:18%;top:28%;--dur:4.2s;--del:0s;--sz:34px">
+            <div class="ar-pip-bubble" style="background-color:rgba(255,159,10,0.18);box-shadow:0 0 14px rgba(255,159,10,0.25)">🍔</div>
+            <div class="ar-pip-label">Shake Shack</div>
+            <div style="font-size:8px;color:rgba(255,255,255,0.3)">120 m</div>
+          </div>
+          <!-- Hotel pip — blue #0A84FF -->
+          <div class="ar-pip" style="left:55%;top:18%;--dur:3.8s;--del:0.6s;--sz:30px">
+            <div class="ar-pip-bubble" style="background-color:rgba(10,132,255,0.18);box-shadow:0 0 14px rgba(10,132,255,0.25)">🏨</div>
+            <div class="ar-pip-label">Marriott</div>
+            <div style="font-size:8px;color:rgba(255,255,255,0.3)">380 m</div>
+          </div>
+          <!-- Rental pip — green #34d399 -->
+          <div class="ar-pip" style="left:74%;top:44%;--dur:5s;--del:1.2s;--sz:32px">
+            <div class="ar-pip-bubble" style="background-color:rgba(52,211,153,0.18);box-shadow:0 0 14px rgba(52,211,153,0.25)">🏠</div>
+            <div class="ar-pip-label">2BR Apt</div>
+            <div class="ar-pip-price">AED 9,200/mo</div>
+          </div>
+          <!-- ATM pip — yellow #FFD60A -->
+          <div class="ar-pip" style="left:36%;top:52%;--dur:4.6s;--del:0.3s;--sz:28px">
+            <div class="ar-pip-bubble" style="background-color:rgba(255,214,10,0.18);box-shadow:0 0 14px rgba(255,214,10,0.25)">🏧</div>
+            <div class="ar-pip-label">ADCB ATM</div>
+            <div style="font-size:8px;color:rgba(255,255,255,0.3)">55 m</div>
+          </div>
+          <!-- News pip — yellow #FFD60A -->
+          <div class="ar-pip" style="left:10%;top:58%;--dur:3.5s;--del:1.8s;--sz:28px">
+            <div class="ar-pip-bubble" style="background-color:rgba(255,214,10,0.18);box-shadow:0 0 14px rgba(255,214,10,0.25)">⚡</div>
+            <div class="ar-pip-label">Road closure</div>
+          </div>
+        </div>
+        <div class="ar-crosshair"></div>
+        <div class="ar-corner ar-corner-tl"></div>
+        <div class="ar-corner ar-corner-tr"></div>
+        <div class="ar-corner ar-corner-bl"></div>
+        <div class="ar-corner ar-corner-br"></div>
+        <div class="ar-heading">NE · 38°</div>
+      </div>
+    </div>
+
+    <!-- What you can discover -->
+    <div class="splash-uses">
+      <div class="use-pill">🍽 Restaurants & Cafés</div>
+      <div class="use-pill">🏨 Hotels & Stays</div>
+      <div class="use-pill">🏠 Rentals for Lease</div>
+      <div class="use-pill">⛽ ATMs & Services</div>
+      <div class="use-pill">⚡ Local News</div>
+      <div class="use-pill">💊 Pharmacies</div>
+    </div>
+
+    <!-- How it works — 3 steps -->
+    <div class="splash-steps">
+      <div class="steps-label">How it works</div>
+      <div class="steps-list">
+        <div class="step-row">
+          <div class="step-num">1</div>
+          <div class="step-text">
+            <div class="step-title">Allow camera & location</div>
+            <div class="step-sub">One-time permission — nothing is stored or shared</div>
+          </div>
+          <div class="step-icon">📍</div>
+        </div>
+        <div class="step-row">
+          <div class="step-num">2</div>
+          <div class="step-text">
+            <div class="step-title">Point your phone around</div>
+            <div class="step-sub">AR pins float over the live camera view</div>
+          </div>
+          <div class="step-icon">📱</div>
+        </div>
+        <div class="step-row">
+          <div class="step-num">3</div>
+          <div class="step-text">
+            <div class="step-title">Tap any pin for details</div>
+            <div class="step-sub">Hours, directions, prices & more — instantly</div>
+          </div>
+          <div class="step-icon">👆</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Calibration toast -->
+<div id="calib-toast">🔄 Wave phone in a figure-8 to calibrate compass</div>
+
+<!-- Refresh button -->
+<button id="refresh-btn" style="display:none">
+  <span>↺</span> Refresh Places
+</button>
+
+<!-- Filter bar -->
+<div id="filter-bar"></div>
+
+<!-- Debug toggle -->
+<button id="debug-toggle" style="position:fixed;bottom:40px;right:20px;background:rgba(8,8,14,0.88);color:rgba(255,255,255,0.4);border:0.5px solid rgba(255,255,255,0.12);border-radius:50px;font-size:11.5px;padding:8px 14px;cursor:pointer;z-index:15;font-family:inherit;display:none;">🔍 Debug</button>
+
+<!-- Debug panel -->
+<div id="debug-panel" style="display:none;position:fixed;top:80px;left:10px;right:10px;bottom:auto;max-height:55vh;overflow-y:auto;background:rgba(0,0,0,0.94);color:#00ff88;font-family:monospace;font-size:11px;line-height:1.6;padding:12px 14px;border-radius:12px;z-index:80;border:0.5px solid rgba(0,255,136,0.25);white-space:pre-wrap;word-break:break-all;"></div>
+
+<script>
+// ─────────────────────────────────────────────
+//  State
+// ─────────────────────────────────────────────
+const state = {
+  lat: null, lon: null,
+  heading: 0,
+  rawHeading: 0,
+  headingReceived: false,
+  places: [],
+  bazingaPlaces: [],
+  rentalPlaces: [],
+  demoMode: false,
+  ready: false,
+  permOrientation: false,
+};
+
+// Low-pass filter alpha (higher = smoother but laggier)
+const SMOOTH = 0.12;
+const FOV_H  = 65;   // assumed horizontal FOV degrees
+const MAX_DIST = 1500; // FIX: 500m too small for Fujairah/sparse cities — 1500m
+
+// ─────────────────────────────────────────────
+//  Filter definitions
+//  Each entry drives: the chip label, OSM query
+//  tags, dot color, emoji, and category label.
+// ─────────────────────────────────────────────
+const FILTER_DEFS = [
+  { id:'all',       label:'All',          emoji:'🌐', color:'#636366' },
+  { id:'food',      label:'Food & Cafés', emoji:'🍽', color:'#FF3B30',
+    amenityMatch: ['restaurant','cafe','fast_food','bar','bakery'] },
+  { id:'hotel',     label:'Stay',         emoji:'🏨', color:'#0A84FF',
+    tourismMatch: ['hotel','motel','hostel','guest_house','resort'] },
+  { id:'utilities', label:'Utilities',    emoji:'🏪', color:'#30D158',
+    amenityMatch: ['atm','bank','fuel','pharmacy','supermarket','marketplace'],
+    shopMatch:    ['supermarket','convenience','general','pharmacy','mall'] },
+  { id:'bazinga',   label:'Bazinga',      emoji:'⚡', color:'#FFD60A', isBazinga: true },
+  { id:'rentals',    label:'Rentals',      emoji:'🏠', color:'#34C759', isRental: true  },
+];
+
+// Active filter IDs — multi-select; 'all' is the default catch-all
+const state_filters = new Set(['all']);
+
+// Auto-retry backoff state
+let _retryCount = 0;
+const RETRY_DELAYS_MS = [15000, 30000, 60000]; // 15s → 30s → 60s cap
+
+// ─────────────────────────────────────────────
+//  Utilities
+// ─────────────────────────────────────────────
+function toRad(d){ return d * Math.PI / 180; }
+function toDeg(r){ return r * 180 / Math.PI; }
+
+function haversine(lat1, lon1, lat2, lon2){
+  const R = 6371000;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function bearing(lat1, lon1, lat2, lon2){
+  const dLon = toRad(lon2 - lon1);
+  const y = Math.sin(dLon) * Math.cos(toRad(lat2));
+  const x = Math.cos(toRad(lat1))*Math.sin(toRad(lat2)) - Math.sin(toRad(lat1))*Math.cos(toRad(lat2))*Math.cos(dLon);
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+
+function angleDiff(a, b){
+  let d = ((a - b) + 180) % 360 - 180;
+  if(d < -180) d += 360;
+  return d;
+}
+
+function smoothAngle(current, target, alpha){
+  let diff = angleDiff(target, current);
+  return (current + alpha * diff + 360) % 360;
+}
+
+function formatDist(m){
+  if(m < 1000) return Math.round(m) + ' m';
+  return (m/1000).toFixed(1) + ' km';
+}
+
+function formatCategory(tags){
+  // Stay
+  if(tags.tourism === 'hotel')       return 'Hotel';
+  if(tags.tourism === 'motel')       return 'Motel';
+  if(tags.tourism === 'hostel')      return 'Hostel';
+  if(tags.tourism === 'guest_house') return 'Guest House';
+  if(tags.tourism === 'resort')      return 'Resort';
+  // Food & Cafés
+  if(tags.amenity === 'cafe')        return 'Café';
+  if(tags.amenity === 'fast_food')   return 'Fast Food';
+  if(tags.amenity === 'bar')         return 'Bar';
+  if(tags.amenity === 'bakery')      return 'Bakery';
+  if(tags.amenity === 'restaurant'){
+    if(tags.cuisine) return tags.cuisine.split(';')[0].replace(/_/g,' ');
+    return 'Restaurant';
+  }
+  // Utilities
+  if(tags.amenity === 'atm')         return 'ATM';
+  if(tags.amenity === 'bank')        return 'Bank';
+  if(tags.amenity === 'fuel')        return 'Petrol Station';
+  if(tags.amenity === 'pharmacy' || tags.shop === 'pharmacy') return 'Pharmacy';
+  if(tags.amenity === 'supermarket' || tags.shop === 'supermarket') return 'Supermarket';
+  if(tags.shop === 'mall')           return 'Mall';
+  if(tags.shop === 'convenience')    return 'Convenience Store';
+  if(tags.amenity === 'marketplace') return 'Market';
+  if(tags.shop)                      return tags.shop.replace(/_/g,' ');
+  return 'Place';
+}
+
+function getTypeEmoji(tags){
+  // Stay
+  if(tags.tourism === 'hotel' || tags.tourism === 'motel' || tags.tourism === 'hostel' || tags.tourism === 'guest_house' || tags.tourism === 'resort') return '🏨';
+  // Food & Cafés
+  if(tags.amenity === 'cafe')      return '☕';
+  if(tags.amenity === 'fast_food') return '🍔';
+  if(tags.amenity === 'bar')       return '🍺';
+  if(tags.amenity === 'bakery')    return '🥐';
+  // Utilities
+  if(tags.amenity === 'atm')       return '🏧';
+  if(tags.amenity === 'bank')      return '🏦';
+  if(tags.amenity === 'fuel')      return '⛽';
+  if(tags.amenity === 'pharmacy' || tags.shop === 'pharmacy') return '💊';
+  if(tags.amenity === 'supermarket' || tags.shop === 'supermarket' || tags.shop === 'convenience' || tags.shop === 'mall') return '🛒';
+  if(tags.amenity === 'marketplace') return '🏪';
+  // Default food
+  return '🍽';
+}
+
+function getDotColor(tags){
+  // Stay — blue
+  if(tags.tourism === 'hotel' || tags.tourism === 'motel' || tags.tourism === 'hostel' || tags.tourism === 'guest_house' || tags.tourism === 'resort') return [10,132,255];
+  // Food & Cafés — red/orange palette
+  if(tags.amenity === 'cafe')      return [255,159,10];
+  if(tags.amenity === 'fast_food') return [255,107,53];
+  if(tags.amenity === 'bar')       return [255,45,85];
+  if(tags.amenity === 'bakery')    return [255,179,64];
+  // Utilities — green/yellow
+  if(tags.amenity === 'atm' || tags.amenity === 'bank')      return [255,214,10];
+  if(tags.amenity === 'fuel')                                 return [100,210,255];
+  if(tags.amenity === 'pharmacy' || tags.shop === 'pharmacy') return [48,209,88];
+  if(tags.amenity === 'supermarket' || tags.shop === 'supermarket' || tags.shop === 'convenience' || tags.shop === 'mall') return [48,209,88];
+  if(tags.amenity === 'marketplace') return [48,209,88];
+  // Default food — red
+  return [255,59,48];
+}
+
+function placePassesFilter(place){
+  if(place.isBazinga) return state_filters.has('all') || state_filters.has('bazinga');
+  if(place.isRental)  return state_filters.has('all') || state_filters.has('rentals');
+  if(state_filters.size === 1 && (state_filters.has('bazinga') || state_filters.has('rentals'))) return false;
+  if(state_filters.has('all')) return true;
+  const tags = place.tags;
+  for(const fid of state_filters){
+    const def = FILTER_DEFS.find(f => f.id === fid);
+    if(!def || def.isBazinga) continue;
+    if(def.amenityMatch && tags.amenity && def.amenityMatch.includes(tags.amenity)) return true;
+    if(def.tourismMatch && tags.tourism && def.tourismMatch.includes(tags.tourism)) return true;
+    if(def.shopMatch    && tags.shop    && def.shopMatch.includes(tags.shop))       return true;
+  }
+  return false;
+}
+
+const video      = document.getElementById('video');
+const canvas     = document.getElementById('ar-canvas');
+const ctx        = canvas.getContext('2d');
+const dotLayer   = document.getElementById('dot-layer');
+const splash     = document.getElementById('splash');
+const statusPill = document.getElementById('status-pill');
+const loadOverlay= document.getElementById('loading-overlay');
+const infoPanel  = document.getElementById('info-panel');
+const compassSVG = document.getElementById('compass-svg');
+const calibToast = document.getElementById('calib-toast');
+const placeCount = document.getElementById('place-count');
+const refreshBtn = document.getElementById('refresh-btn');
+const filterBar  = document.getElementById('filter-bar');
+
+// ─────────────────────────────────────────────
+//  Filter bar
+// ─────────────────────────────────────────────
+(function buildFilterBar(){
+  FILTER_DEFS.forEach(def => {
+    const chip = document.createElement('button');
+    chip.className = 'filter-chip' + (def.id === 'all' ? ' active' : '');
+    chip.dataset.fid = def.id;
+    chip.style.setProperty('--chip-color', def.color);
+    chip.innerHTML = `<span class="chip-emoji">${def.emoji}</span>${def.label}`;
+    chip.addEventListener('click', () => handleFilterTap(def.id));
+    filterBar.appendChild(chip);
+  });
+})();
+
+function handleFilterTap(fid){
+  if(fid === 'all'){
+    state_filters.clear();
+    state_filters.add('all');
+  } else {
+    state_filters.delete('all');
+    if(state_filters.has(fid)){
+      state_filters.delete(fid);
+      if(state_filters.size === 0) state_filters.add('all');
+    } else {
+      state_filters.add(fid);
+    }
+  }
+  filterBar.querySelectorAll('.filter-chip').forEach(chip => {
+    chip.classList.toggle('active', state_filters.has(chip.dataset.fid));
+  });
+  const _onlyBz=state_filters.has('bazinga')&&state_filters.size===1;
+  const _onlyRent=state_filters.has('rentals')&&state_filters.size===1;
+  const _osmVis=(_onlyBz||_onlyRent)?0:state.places.filter(placePassesFilter).length;
+  const _bzVis=state_filters.has('all')||state_filters.has('bazinga')?state.bazingaPlaces.length:0;
+  const _rentVis=state_filters.has('all')||state_filters.has('rentals')?(state.rentalPlaces||[]).length:0;
+  placeCount.textContent=_osmVis+_bzVis+_rentVis;
+}
+
+function showFilterBar(){
+  filterBar.style.display = 'flex';
+}
+
+// ─────────────────────────────────────────────
+//  Canvas roundRect polyfill
+// ─────────────────────────────────────────────
+if(!CanvasRenderingContext2D.prototype.roundRect){
+  CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r){
+    const radius = Math.min(typeof r === 'number' ? r : r[0], w / 2, h / 2);
+    this.moveTo(x + radius, y);
+    this.lineTo(x + w - radius, y);
+    this.arcTo(x + w, y, x + w, y + radius, radius);
+    this.lineTo(x + w, y + h - radius);
+    this.arcTo(x + w, y + h, x + w - radius, y + h, radius);
+    this.lineTo(x + radius, y + h);
+    this.arcTo(x, y + h, x, y + h - radius, radius);
+    this.lineTo(x, y + radius);
+    this.arcTo(x, y, x + radius, y, radius);
+    this.closePath();
+    return this;
+  };
+}
+
+let _resizeTimer = null;
+function resizeCanvas(){
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', () => {
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(resizeCanvas, 80);
+});
+resizeCanvas();
+
+// ─────────────────────────────────────────────
+//  Debug log
+// ─────────────────────────────────────────────
+const debugLines = [];
+function dbg(msg){
+  const t = new Date().toISOString().slice(11,19);
+  debugLines.push(t + ' ' + msg);
+  if(debugLines.length > 28) debugLines.shift();
+  const el = document.getElementById('debug-panel');
+  if(el) el.innerText = debugLines.join('\n');
+  console.log('[AR]', msg);
+}
+
+// ─────────────────────────────────────────────
+//  OSM Overpass fetch
+// ─────────────────────────────────────────────
+let fetchInFlight = false;
+let fetchRetryTimer = null;
+
+async function fetchPlaces(lat, lon){
+  if(lat == null || lon == null){
+    statusPill.textContent = 'Waiting for GPS…';
+    dbg('GPS null — aborting fetch');
+    return;
+  }
+  if(fetchInFlight){
+    dbg('fetchPlaces: already in flight — skipping duplicate call');
+    return;
+  }
+  fetchInFlight = true;
+
+  const _safetyTimer = setTimeout(() => {
+    if(fetchInFlight){
+      fetchInFlight = false;
+      loadOverlay.classList.remove('active');
+      statusPill.textContent = '⚠️ Timed out — tap Refresh';
+      dbg('Safety timeout fired — fetchPlaces hung > 35s');
+    }
+  }, 35000);
+
+  const CACHE_VER = 'v2';
+  const cacheKey = 'arplaces_' + CACHE_VER + '_' + lat.toFixed(3) + '_' + lon.toFixed(3);
+  const cacheMetaKey = 'arplaces_meta_' + CACHE_VER;
+  try {
+    const cached = sessionStorage.getItem(cacheKey);
+    const meta   = JSON.parse(sessionStorage.getItem(cacheMetaKey) || '{}');
+    const ageSec = meta.ts ? (Date.now() - meta.ts) / 1000 : 9999;
+    const movedM = (meta.lat != null && meta.lon != null)
+      ? haversine(lat, lon, meta.lat, meta.lon) : 0;
+
+    if(cached && ageSec < 300 && movedM < 300){
+      const parsed = JSON.parse(cached);
+      if(Array.isArray(parsed) && parsed.length > 0){
+        state.places = parsed.map(p => ({ ...p, dist: haversine(lat, lon, p.lat, p.lon) }));
+        placeCount.textContent = state.places.filter(placePassesFilter).length+(state.bazingaPlaces||[]).length+(state.rentalPlaces||[]).length;
+        statusPill.textContent = state.places.length + ' places nearby (cached)';
+        dbg('Cache hit — ' + state.places.length + ' places, age=' + Math.round(ageSec) + 's moved=' + Math.round(movedM) + 'm');
+        fetchFailed = false;
+        fetchInFlight = false;
+        clearTimeout(_safetyTimer);
+        showCalibToast();
+        return;
+      }
+    } else if(cached){
+      dbg('Cache stale — age=' + Math.round(ageSec) + 's moved=' + Math.round(movedM) + 'm — fetching fresh');
+    }
+  } catch(e){ dbg('Cache read error: ' + e.message); }
+
+  dbg('fetch lat=' + lat.toFixed(5) + ' lon=' + lon.toFixed(5) + ' r=' + MAX_DIST + 'm');
+  statusPill.textContent = '⏳ Searching nearby places…';
+  loadOverlay.classList.add('active');
+
+  if(fetchRetryTimer !== null){ clearTimeout(fetchRetryTimer); fetchRetryTimer = null; }
+
+  // Overpass QL query — kept identical to original
+  // OSM query — scoped to the 4 filter categories only
+  const _a = MAX_DIST + ',' + lat + ',' + lon;
+  const query = '[out:json][timeout:20];(' +
+    // Food & Cafés
+    'node["amenity"~"restaurant|cafe|fast_food|bar|bakery"](around:' + _a + ');' +
+    'way["amenity"~"restaurant|cafe|fast_food|bar|bakery"](around:'  + _a + ');' +
+    // Stay
+    'node["tourism"~"hotel|motel|hostel|guest_house|resort"](around:' + _a + ');' +
+    'way["tourism"~"hotel|motel|hostel|guest_house|resort"](around:'  + _a + ');' +
+    // Utilities
+    'node["amenity"~"atm|bank|fuel|pharmacy|supermarket|marketplace"](around:' + _a + ');' +
+    'way["amenity"~"atm|bank|fuel|pharmacy|supermarket|marketplace"](around:'  + _a + ');' +
+    'node["shop"~"supermarket|mall|convenience|general|pharmacy"](around:' + _a + ');' +
+    'way["shop"~"supermarket|mall|convenience|general|pharmacy"](around:'  + _a + ');' +
+    ');out center tags;';
+  const body = 'data=' + encodeURIComponent(query);
+
+  // ── Fetch via /api/osm (server-side proxy — no CORS/allowlist issues) ───
+  let data = null;
+  try {
+    const t0 = Date.now();
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 30000);
+    const res = await fetch('/api/osm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    const elapsed = Date.now() - t0;
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const text = await res.text();
+    data = JSON.parse(text);
+    dbg('✓ /api/osm ' + elapsed + 'ms (' + (data.elements?.length ?? '?') + ' el)');
+  } catch(err) {
+    dbg('✗ /api/osm: ' + err.message);
+  }
+
+  // NOTE: failure path uses `finally` below — no `return` here so fetchInFlight always resets
+  try {
+    if (!data || !Array.isArray(data.elements)) {
+      const delay = RETRY_DELAYS_MS[Math.min(_retryCount, RETRY_DELAYS_MS.length - 1)];
+      _retryCount++;
+      const delaySec = Math.round(delay / 1000);
+      statusPill.textContent = '⚠️ No server responded';
+      showErrorToast('All OSM servers unreachable. Auto-retry in ' + delaySec + 's — or tap Refresh now.');
+      dbg('All mirrors failed (attempt ' + _retryCount + ') — retry in ' + delaySec + 's');
+      fetchFailed = true;
+      fetchRetryTimer = setTimeout(() => {
+        fetchRetryTimer = null;
+        if (state.lat !== null && !state.demoMode) {
+          dbg('Auto-retry #' + _retryCount);
+          fetchPlaces(state.lat, state.lon);
+        }
+      }, delay);
+      // ← NO return here; fall through to finally so fetchInFlight resets
+    } else {
+
+    _retryCount = 0;
+
+    dbg('Raw elements: ' + data.elements.length);
+    const mapped = data.elements.map(function(el){
+      const elLat = el.lat != null ? el.lat : (el.center && el.center.lat);
+      const elLon = el.lon != null ? el.lon : (el.center && el.center.lon);
+      if(elLat == null || elLon == null) return null;
+      const t = el.tags || {};
+      // Prefer English name, fall back to any name tag, drop entirely if none
+      const name = t['name:en'] || t['name'] || t['name:ar'] || null;
+      if(!name) return null;
+      return {
+        id: el.id, osmType: el.type || 'node',
+        name,
+        lat: elLat, lon: elLon,
+        tags: t,
+        dist: haversine(lat, lon, elLat, elLon),
+      };
+    });
+
+    const afterNull   = mapped.filter(Boolean);
+    const afterRadius = afterNull.filter(function(p){ return p.dist <= MAX_DIST; });
+    const sorted      = afterRadius.sort(function(a,b){ return a.dist - b.dist; }).slice(0, 60);
+
+    dbg('Raw=' + data.elements.length + ' named=' + afterNull.length + ' inRadius=' + afterRadius.length + ' final=' + sorted.length);
+    state.places = sorted;
+    placeCount.textContent = sorted.filter(placePassesFilter).length+(state.bazingaPlaces||[]).length+(state.rentalPlaces||[]).length;
+    fetchFailed = false;
+    currentRadius = MAX_DIST;
+
+    if (sorted.length > 0) {
+      try {
+        sessionStorage.setItem(cacheKey, JSON.stringify(sorted));
+        sessionStorage.setItem(cacheMetaKey, JSON.stringify({ ts: Date.now(), lat, lon }));
+      } catch(e){ dbg('Cache write error: ' + e.message); }
+    }
+
+    if (sorted.length === 0) {
+      statusPill.textContent = '0 places — tap Refresh to widen';
+      showErrorToast('0 places within ' + (MAX_DIST/1000).toFixed(1) + ' km. Tap Refresh to widen search.');
+    } else {
+      statusPill.textContent = sorted.length + ' places nearby';
+      showCalibToast();
+    }
+
+    if (!state.demoMode) fetchBazingaPlaces(lat, lon).catch(e => dbg('Bazinga: ' + e.message));
+    if (!state.demoMode) fetchRentalPlaces(lat, lon).catch(e => dbg('Rentals: ' + e.message));
+
+    } // end else (success path)
+  } finally {
+    clearTimeout(_safetyTimer);
+    fetchInFlight = false;
+    loadOverlay.classList.remove('active');
+  }
+}
+
+function showErrorToast(msg){
+  let t = document.getElementById('error-toast');
+  if(!t){
+    t = document.createElement('div');
+    t.id = 'error-toast';
+    t.style.cssText = `
+      position:fixed; bottom:110px; left:16px; right:16px;
+      background:rgba(255,59,48,0.92); color:#fff;
+      border-radius:14px; padding:12px 16px;
+      font-size:13px; line-height:1.5;
+      z-index:30; backdrop-filter:blur(8px);
+      display:flex; gap:12px; align-items:flex-start;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+    `;
+    document.body.appendChild(t);
+  }
+  t.innerHTML = '';
+  const txt = document.createElement('span');
+  txt.style.flex = '1';
+  txt.textContent = msg;
+  const x = document.createElement('span');
+  x.textContent = '✕';
+  x.style.cssText = 'cursor:pointer;opacity:0.7;flex-shrink:0;font-size:15px;';
+  x.onclick = () => t.remove();
+  t.appendChild(txt);
+  t.appendChild(x);
+  setTimeout(() => t?.remove(), 8000);
+}
+
+function loadDemoPlaces(){
+  const base = { lat: 25.1195, lon: 56.3418 };
+  const demos = [
+    { name: 'Al Meshwar Restaurant', dlat: 0.001,  dlon: 0.002,  tags: { amenity:'restaurant', cuisine:'arabic' } },
+    { name: 'Café de Paris',         dlat:-0.002,  dlon: 0.001,  tags: { amenity:'cafe' } },
+    { name: 'Tokyo Garden',          dlat: 0.003,  dlon:-0.001,  tags: { amenity:'restaurant', cuisine:'japanese' } },
+    { name: 'Burger District',       dlat:-0.001,  dlon:-0.003,  tags: { amenity:'fast_food', cuisine:'burger' } },
+    { name: 'The Shisha Lounge',     dlat: 0.0015, dlon: 0.004,  tags: { amenity:'bar' } },
+    { name: 'Spice Route',           dlat:-0.003,  dlon: 0.002,  tags: { amenity:'restaurant', cuisine:'indian' } },
+    { name: 'ADNOC Fuel Station',    dlat: 0.0025, dlon:-0.0035, tags: { amenity:'fuel' } },
+    { name: 'ENOC Petrol',           dlat:-0.004,  dlon: 0.003,  tags: { amenity:'fuel' } },
+    { name: 'Fujairah Fort',         dlat: 0.004,  dlon: 0.001,  tags: { tourism:'attraction' } },
+    { name: 'Heritage Village',      dlat:-0.005,  dlon:-0.002,  tags: { tourism:'museum' } },
+    { name: 'Corniche Viewpoint',    dlat: 0.0035, dlon: 0.005,  tags: { tourism:'viewpoint' } },
+    { name: 'Rotana Hotel',          dlat:-0.002,  dlon:-0.004,  tags: { tourism:'hotel' } },
+    { name: 'Fujairah Mall',         dlat: 0.005,  dlon:-0.003,  tags: { shop:'mall' } },
+    { name: 'Lulu Hypermarket',      dlat:-0.0035, dlon: 0.005,  tags: { shop:'supermarket' } },
+    { name: 'Life Pharmacy',         dlat: 0.0015, dlon:-0.002,  tags: { amenity:'pharmacy' } },
+    { name: 'Emirates NBD ATM',      dlat:-0.001,  dlon: 0.003,  tags: { amenity:'atm' } },
+    { name: 'Grand Mosque',          dlat: 0.006,  dlon: 0.002,  tags: { amenity:'place_of_worship', religion:'muslim' } },
+  ];
+  state.lat = base.lat; state.lon = base.lon;
+  state.places = demos.map((d, i) => ({
+    id: i, name: d.name,
+    lat: base.lat + d.dlat, lon: base.lon + d.dlon,
+    tags: d.tags,
+    dist: haversine(base.lat, base.lon, base.lat+d.dlat, base.lon+d.dlon)
+  }));
+  placeCount.textContent = state.places.length;
+  statusPill.textContent = 'Demo mode – rotate phone';
+  state.bazingaPlaces = [
+    { id:'bz1', isBazinga:true, name:'Street Market Closed', headline:'Weekend market shut by municipality', summary:'The popular weekend street market has been temporarily closed for a routine safety inspection. Expected to reopen next Friday.', category:'Local News', lat: base.lat+0.002, lon: base.lon+0.003, dist: haversine(base.lat, base.lon, base.lat+0.002, base.lon+0.003), tags:{} },
+    { id:'bz2', isBazinga:true, name:'Cultural Festival', headline:'Annual heritage festival kicks off this weekend', summary:'The city\'s annual cultural heritage festival begins Saturday with traditional music and food stalls at the central plaza. Free entry.', category:'Events', lat: base.lat-0.003, lon: base.lon+0.004, dist: haversine(base.lat, base.lon, base.lat-0.003, base.lon+0.004), tags:{} },
+    { id:'bz3', isBazinga:true, name:'Road Works Alert', headline:'Major road closure affects city centre', summary:'A key intersection near the commercial district will be closed for 3 days for emergency pipe repairs. Drivers advised to use alternate routes.', category:'Traffic', lat: base.lat+0.004, lon: base.lon-0.002, dist: haversine(base.lat, base.lon, base.lat+0.004, base.lon-0.002), tags:{} },
+  ];
+}
+
+// ─────────────────────────────────────────────
+//  Compass
+// ─────────────────────────────────────────────
+let orientationCount = 0;
+let lastRealHeading = null;
+
+function handleOrientation(e){
+  let h;
+  if(typeof e.webkitCompassHeading === 'number' && e.webkitCompassHeading >= 0){
+    h = e.webkitCompassHeading;
+  } else if(e.alpha !== null && e.alpha !== undefined){
+    h = (360 - e.alpha) % 360;
+  } else {
+    return;
+  }
+
+  orientationCount++;
+  if(!state.headingReceived){
+    state.heading = h;
+    state.headingReceived = true;
+    lastRealHeading = h;
+    dbg('compass first fix: ' + h.toFixed(1) + '°');
+  } else {
+    if(lastRealHeading === null || Math.abs(angleDiff(h, lastRealHeading)) > 0.3){
+      const jump = Math.abs(angleDiff(h, state.heading));
+      const alpha = jump > 60 ? 0.6 : 0.25;
+      if(jump > 60) dbg('compass jump ' + jump.toFixed(0) + '° → snap (alpha=0.6)');
+      lastRealHeading = h;
+      state.heading = smoothAngle(state.heading, h, alpha);
+    }
+  }
+
+  compassSVG.style.transform = 'rotate(' + (-state.heading) + 'deg)';
+
+  const now2 = Date.now();
+  if(!state._lastHeadingLog || now2 - state._lastHeadingLog > 3000){
+    state._lastHeadingLog = now2;
+    dbg('heading=' + state.heading.toFixed(1) + '° raw=' + h.toFixed(1) + '° events=' + orientationCount);
+  }
+}
+
+function registerOrientationListeners(){
+  window.removeEventListener('deviceorientationabsolute', handleOrientation, true);
+  window.removeEventListener('deviceorientation', handleOrientation, true);
+  window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+  window.addEventListener('deviceorientation', handleOrientation, true);
+}
+
+async function requestOrientationPermission(){
+  if(typeof DeviceOrientationEvent !== 'undefined' &&
+     typeof DeviceOrientationEvent.requestPermission === 'function'){
+    try {
+      const perm = await DeviceOrientationEvent.requestPermission();
+      dbg('orientation permission: ' + perm);
+      if(perm === 'granted'){
+        registerOrientationListeners();
+        state.permOrientation = true;
+        setInterval(registerOrientationListeners, 10000);
+      } else {
+        dbg('compass: permission denied — radar mode will stay active');
+      }
+    } catch(err){
+      dbg('compass permission error: ' + err.message);
+    }
+  } else {
+    registerOrientationListeners();
+    state.permOrientation = true;
+    dbg('compass: no permission needed, listeners registered');
+  }
+}
+
+async function startCamera(){
+  const attempts = [
+    { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
+    { video: { facingMode: 'environment' }, audio: false },
+    { video: true, audio: false },
+  ];
+  for(const constraints of attempts){
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      video.srcObject = stream;
+      try { await video.play(); } catch(_){}
+      dbg('camera started');
+      return;
+    } catch(e){
+      dbg('camera attempt failed (' + e.name + ')');
+    }
+  }
+  statusPill.textContent = '📷 Camera access denied';
+}
+
+// ─────────────────────────────────────────────
+//  GPS & location
+// ─────────────────────────────────────────────
+let gpsWatchId = null;
+let gpsFetched = false;
+let fetchFailed = false;
+let gpsRetryTimer = null;
+let gpsWatchActive = false;
+let gpsFailCount = 0;
+let gpsPhase = 'high';
+const GPS_HIGH_MAX = 2;
+const GPS_LOW_MAX  = 2;
+
+function clearGPSWatch(){
+  if(gpsWatchId !== null){
+    navigator.geolocation.clearWatch(gpsWatchId);
+    gpsWatchId = null;
+  }
+  if(gpsRetryTimer !== null){
+    clearTimeout(gpsRetryTimer);
+    gpsRetryTimer = null;
+  }
+  gpsWatchActive = false;
+}
+
+function showManualLocationPrompt(){
+  if(document.getElementById('manual-loc-prompt')) return;
+  const overlay = document.createElement('div');
+  overlay.id = 'manual-loc-prompt';
+  overlay.style.cssText = `
+    position:fixed; inset:0; background:rgba(0,0,0,0.85);
+    display:flex; flex-direction:column; align-items:center;
+    justify-content:center; gap:16px; padding:32px;
+    text-align:center; z-index:200;
+  `;
+  overlay.innerHTML = `
+    <div style="font-size:40px">📍</div>
+    <div style="font-size:18px;font-weight:600;color:#fff">GPS unavailable indoors</div>
+    <div style="font-size:13px;color:rgba(255,255,255,0.55);max-width:280px;line-height:1.6">
+      Step outside or enter your location to find nearby places.
+    </div>
+    <input id="manual-loc-input" type="text" placeholder="e.g. Dubai Mall, Dubai"
+      style="width:100%;max-width:300px;padding:14px 16px;border-radius:12px;border:1px solid rgba(255,255,255,0.2);
+             background:rgba(255,255,255,0.08);color:#fff;font-size:15px;font-family:inherit;outline:none;" />
+    <button id="manual-loc-go" style="background:#FF3B30;color:#fff;border:none;
+      border-radius:50px;padding:14px 36px;font-size:15px;font-weight:600;
+      font-family:inherit;cursor:pointer;width:100%;max-width:300px;">Search This Location</button>
+    <button id="manual-loc-retry" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.6);
+      border:0.5px solid rgba(255,255,255,0.2);border-radius:50px;padding:12px 28px;
+      font-size:14px;font-family:inherit;cursor:pointer;width:100%;max-width:300px;">
+      Try GPS Again (go outside first)
+    </button>
+  `;
+  document.body.appendChild(overlay);
+
+  document.getElementById('manual-loc-go').addEventListener('click', async () => {
+    const query = document.getElementById('manual-loc-input').value.trim();
+    if(!query) return;
+    statusPill.textContent = 'Searching…';
+    try {
+      const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(query);
+      const r = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+      const results = await r.json();
+      if(!results || results.length === 0){
+        statusPill.textContent = 'Location not found';
+        showErrorToast('Could not find "' + query + '". Try a more specific address.');
+        return;
+      }
+      const loc = results[0];
+      state.lat = parseFloat(loc.lat);
+      state.lon = parseFloat(loc.lon);
+      dbg('Manual geocode: ' + state.lat.toFixed(5) + ',' + state.lon.toFixed(5));
+      overlay.remove();
+      gpsFetched = true;
+      fetchPlaces(state.lat, state.lon);
+    } catch(e){
+      dbg('Geocode error: ' + e.message);
+      showErrorToast('Geocoding failed. Check connection and try again.');
+    }
+  });
+
+  document.getElementById('manual-loc-retry').addEventListener('click', () => {
+    overlay.remove();
+    gpsFailCount = 0;
+    gpsPhase = 'high';
+    clearGPSWatch();
+    startGPSWatch();
+  });
+}
+
+function startGPSWatch(){
+  if(!navigator.geolocation){
+    dbg('ERROR: navigator.geolocation not available');
+    statusPill.textContent = 'GPS not available on this device';
+    return;
+  }
+  if(gpsWatchActive) return;
+  gpsWatchActive = true;
+
+  let opts;
+  if(gpsPhase === 'high'){
+    opts = { enableHighAccuracy: true,  maximumAge: 0,       timeout: 12000 };
+    dbg('GPS phase=HIGH attempt ' + (gpsFailCount + 1) + '/' + GPS_HIGH_MAX);
+    statusPill.textContent = 'Getting GPS fix…';
+  } else if(gpsPhase === 'low'){
+    opts = { enableHighAccuracy: false, maximumAge: 0,       timeout: 12000 };
+    dbg('GPS phase=LOW (WiFi/cell) attempt ' + (gpsFailCount + 1) + '/' + GPS_LOW_MAX);
+    statusPill.textContent = 'Getting location (indoor)…';
+  } else if(gpsPhase === 'cached'){
+    opts = { enableHighAccuracy: false, maximumAge: 300000,  timeout: 8000  };
+    dbg('GPS phase=CACHED (accepting up to 5-min-old position)');
+    statusPill.textContent = 'Using last known location…';
+  } else {
+    opts = { enableHighAccuracy: false, maximumAge: 60000, timeout: 15000 };
+    dbg('GPS phase=' + gpsPhase + ' (unexpected) — using safe defaults');
+  }
+
+  let dots = 0;
+  const pulseBase = statusPill.textContent.replace(/\.+$/, '');
+  const gpsTimer = setInterval(() => {
+    if(state.lat !== null){ clearInterval(gpsTimer); return; }
+    dots = (dots + 1) % 4;
+    statusPill.textContent = pulseBase + '.'.repeat(dots + 1);
+  }, 600);
+
+  gpsWatchId = navigator.geolocation.watchPosition(
+    pos => {
+      clearInterval(gpsTimer);
+      if(gpsRetryTimer){ clearTimeout(gpsRetryTimer); gpsRetryTimer = null; }
+      gpsFailCount = 0;
+      gpsPhase = 'high';
+
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+      const acc = Math.round(pos.coords.accuracy);
+      const age = Math.round((Date.now() - pos.timestamp) / 1000);
+      dbg('GPS fix: ' + lat.toFixed(5) + ',' + lon.toFixed(5) + ' acc=' + acc + 'm age=' + age + 's');
+
+      state.lat = lat;
+      state.lon = lon;
+      state.places.forEach(p => { p.dist = haversine(state.lat, state.lon, p.lat, p.lon); });
+
+      // Update GPS HUD indicator
+      const _gpsDot = document.getElementById('gps-dot');
+      const _gpsLbl = document.getElementById('gps-label');
+      if(_gpsDot){ _gpsDot.classList.remove('searching'); _gpsDot.classList.add('locked'); }
+      if(_gpsLbl){ _gpsLbl.textContent = acc < 25 ? 'GPS ✓' : 'GPS ~'+acc+'m'; }
+
+      if(!gpsFetched){
+        gpsFetched = true;
+        fetchPlaces(lat, lon);
+      } else if(fetchFailed){
+        fetchFailed = false;
+        dbg('GPS re-fix after failed fetch — retrying fetchPlaces');
+        fetchPlaces(lat, lon);
+      }
+
+      if(opts.enableHighAccuracy){
+        clearGPSWatch();
+        gpsWatchActive = true;
+        gpsWatchId = navigator.geolocation.watchPosition(
+          p2 => {
+            state.lat = p2.coords.latitude;
+            state.lon = p2.coords.longitude;
+            state.places.forEach(p => { p.dist = haversine(state.lat, state.lon, p.lat, p.lon); });
+          },
+          () => {},
+          { enableHighAccuracy: false, maximumAge: 30000, timeout: 30000 }
+        );
+      }
+    },
+    err => {
+      clearInterval(gpsTimer);
+      const codes = {1:'PERMISSION_DENIED', 2:'POSITION_UNAVAILABLE', 3:'TIMEOUT'};
+      dbg('GPS error [' + gpsPhase + ']: ' + (codes[err.code]||'ERR_'+err.code));
+
+      if(err.code === 1){
+        clearGPSWatch();
+        statusPill.textContent = '📍 Location access denied';
+        showErrorToast('Location permission denied. Enable it in Settings → Safari → Location → Allow.');
+        return;
+      }
+
+      gpsFailCount++;
+      clearGPSWatch();
+
+      if(gpsPhase === 'high' && gpsFailCount >= GPS_HIGH_MAX){
+        gpsPhase = 'low';
+        gpsFailCount = 0;
+        dbg('Switching to LOW accuracy mode');
+        gpsRetryTimer = setTimeout(() => { gpsRetryTimer = null; startGPSWatch(); }, 1000);
+      } else if(gpsPhase === 'low' && gpsFailCount >= GPS_LOW_MAX){
+        gpsPhase = 'cached';
+        gpsFailCount = 0;
+        dbg('Trying cached position');
+        gpsRetryTimer = setTimeout(() => { gpsRetryTimer = null; startGPSWatch(); }, 500);
+      } else if(gpsPhase === 'cached'){
+        dbg('All GPS phases failed — showing manual location prompt');
+        if(state.lat === null) showManualLocationPrompt();
+      } else {
+        const delay = gpsPhase === 'high' ? [3,6][gpsFailCount-1]||8 : 3;
+        dbg('GPS retry in ' + delay + 's (phase=' + gpsPhase + ' fail #' + gpsFailCount + ')');
+        statusPill.textContent = 'GPS retrying…';
+        gpsRetryTimer = setTimeout(() => { gpsRetryTimer = null; startGPSWatch(); }, delay * 1000);
+      }
+    },
+    opts
+  );
+}
+
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible' && state.ready){
+    if(!gpsWatchActive){
+      dbg('Page visible — GPS watch was dead, restarting');
+      gpsFailCount = 0;
+      gpsPhase = 'high';
+      startGPSWatch();
+    }
+    registerOrientationListeners();
+  }
+});
+
+window.addEventListener('pageshow', e => {
+  if(e.persisted && state.ready){
+    dbg('pageshow (persisted) — restarting GPS and compass');
+    gpsFailCount = 0;
+    gpsPhase = 'high';
+    clearGPSWatch();
+    startGPSWatch();
+    registerOrientationListeners();
+  }
+});
+
+// ─────────────────────────────────────────────
+//  App start
+// ─────────────────────────────────────────────
+// launchApp — called after orientation permission is settled (granted or denied).
+// This function is allowed to freely use await because it is NOT called
+// synchronously from the gesture handler; requestPermission() has already fired.
+async function launchApp(){
+  // Transition: hide splash immediately so the user sees progress
+  splash.style.display = 'none';
+  document.body.classList.add('app-ready');
+  statusPill.textContent = 'Requesting camera…';
+  const _gpsDotInit = document.getElementById('gps-dot');
+  if(_gpsDotInit) _gpsDotInit.classList.add('searching');
+
+  // Non-iOS: register orientation listeners here (no permission needed)
+  if(!state.permOrientation &&
+     (typeof DeviceOrientationEvent === 'undefined' ||
+      typeof DeviceOrientationEvent.requestPermission !== 'function')){
+    registerOrientationListeners();
+    state.permOrientation = true;
+    dbg('compass: no permission needed, listeners registered');
+  }
+
+  try {
+    await startCamera();
+  } catch(camErr) {
+    dbg('Camera start error: ' + (camErr && camErr.message));
+    showErrorToast('⚠️ Camera unavailable — AR overlay only');
+  }
+
+  state.ready = true;
+  refreshBtn.style.display = 'flex';
+  showFilterBar();
+  document.getElementById('debug-toggle').style.display = 'block';
+  if(!_rafRunning){ _rafRunning = true; requestAnimationFrame(renderLoop); }
+
+  startGPSWatch();
+  dbg('App ready. Waiting for GPS fix…');
+}
+
+function startDemo(){
+  state.demoMode = true;
+  splash.style.display = 'none';
+  document.body.classList.add('app-ready');
+  loadDemoPlaces();
+  window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+  window.addEventListener('deviceorientation', handleOrientation, true);
+  let simHeading = 0;
+  setInterval(() => {
+    if(!state.permOrientation){
+      simHeading = (simHeading + 0.4) % 360;
+      state.heading = simHeading;
+      compassSVG.style.transform = `rotate(${-simHeading}deg)`;
+    }
+  }, 50);
+  state.ready = true;
+  refreshBtn.style.display = 'flex';
+  showFilterBar();
+  document.getElementById('debug-toggle').style.display = 'block';
+  dbg('Demo mode ready');
+  if(!_rafRunning){ _rafRunning = true; requestAnimationFrame(renderLoop); }
+}
+
+// ─────────────────────────────────────────────
+//  Calibration toast
+// ─────────────────────────────────────────────
+function showCalibToast(){
+  calibToast.classList.add('show');
+  setTimeout(() => calibToast.classList.remove('show'), 4000);
+}
+
+let _lastHitDots = [];
+function _shouldRebuildHits(dots){
+  if(dots.length !== _lastHitDots.length) return true;
+  for(let i = 0; i < dots.length; i++){
+    const a = dots[i], b = _lastHitDots[i];
+    if(a.place !== b.place || Math.abs(a.x - b.x) > 2 || Math.abs(a.y - b.y) > 2) return true;
+  }
+  return false;
+}
+
+// ─────────────────────────────────────────────
+//  AR Render loop
+// ─────────────────────────────────────────────
+const W = () => canvas.width;
+const H = () => canvas.height;
+
+let frameDots = [];
+let _rafRunning = false;
+
+function renderLoop(){
+  requestAnimationFrame(renderLoop);
+  if(!state.ready) return;
+  if(W() === 0 || H() === 0) return;
+  try { renderFrame(); } catch(e){ dbg('renderFrame error: ' + e.message); }
+}
+
+function renderFrame(){
+  ctx.clearRect(0, 0, W(), H());
+  frameDots = [];
+
+  const compassReady = state.headingReceived;
+  const heading = state.heading;
+  const activeFOV = compassReady ? FOV_H : 360;
+  const halfFOV = activeFOV / 2;
+  const cx = W() / 2;
+  const cy = H() / 2;
+
+  if(!compassReady && state.places.length > 0){
+    ctx.font = '500 13px DM Sans, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.fillText('Compass unavailable — showing all nearby places', cx, H() - 80);
+    ctx.fillText('Rotate phone to enable AR mode', cx, H() - 60);
+  }
+
+  const now = Date.now();
+  const placedPositions = [];
+  const MIN_DOT_GAP = 52;
+
+  const BANDS = 5;
+  const bandH = (H() * 0.60) / BANDS;
+  const topY  = H() * 0.20;
+
+  const allRenderPlaces = [...state.places, ...state.bazingaPlaces, ...state.rentalPlaces];
+  for(let rank = 0; rank < allRenderPlaces.length; rank++){
+    const place = allRenderPlaces[rank];
+    if(!state.lat) break;
+    if(!placePassesFilter(place)) continue;
+    const bear = bearing(state.lat, state.lon, place.lat, place.lon);
+    const diff = compassReady ? angleDiff(bear, heading) : angleDiff(bear, heading);
+
+    const bufFOV = halfFOV + 8;
+    if(compassReady  && Math.abs(diff) > bufFOV) continue;
+    if(!compassReady && Math.abs(diff) > 180)    continue;
+
+    const x = cx + (diff / halfFOV) * cx;
+    const distFactor = Math.max(0, 1 - place.dist / MAX_DIST);
+
+    const bandIdx  = Math.floor((1 - distFactor) * BANDS);
+    const clampedBand = Math.min(bandIdx, BANDS - 1);
+    const bandJitter = ((rank * 53 + 7) % Math.floor(bandH * 0.8)) - (bandH * 0.4);
+    const y = topY + clampedBand * bandH + bandH * 0.5 + bandJitter;
+
+    let tooClose = false;
+    for(const p of placedPositions){
+      const dx = x - p.x, dy = y - p.y;
+      if(dx*dx + dy*dy < MIN_DOT_GAP * MIN_DOT_GAP){ tooClose = true; break; }
+    }
+    if(tooClose) continue;
+    placedPositions.push({x, y});
+
+    const baseSize = 4 + distFactor * 4;
+    const edgeFade = Math.max(0, 1 - Math.abs(diff) / bufFOV);
+    const alpha = edgeFade * (0.80 + distFactor * 0.20);
+    const pulse = rank === 0 ? 1 + 0.10 * Math.sin(now / 700) : 1;
+    const r = baseSize * pulse;
+
+    const isBazinga = !!place.isBazinga;
+    const isRental  = !!place.isRental;
+    const emoji = isRental ? '🏠' : isBazinga ? '⚡' : getTypeEmoji(place.tags);
+    const [dotR, dotG, dotB] = isRental ? [52,199,89] : isBazinga ? [255,214,10] : getDotColor(place.tags);
+    const iconSize = (isBazinga||isRental) ? 32+distFactor*6 : 28+distFactor*8;
+    const bubbleR  = iconSize/2+4;
+    const ep = isBazinga ? pulse*(1+0.18*Math.sin(now/400)) : isRental ? pulse*(1+0.10*Math.sin(now/600)) : pulse;
+
+    // Glow
+    const glowMult = (isBazinga||isRental) ? 2.2 : 1.6;
+    const glow = ctx.createRadialGradient(x, y, bubbleR*0.5, x, y, bubbleR*glowMult);
+    glow.addColorStop(0, `rgba(${dotR},${dotG},${dotB},${alpha*((isBazinga||isRental)?0.55:0.35)})`);
+    glow.addColorStop(1, `rgba(${dotR},${dotG},${dotB},0)`);
+    ctx.beginPath();
+    ctx.arc(x, y, bubbleR*glowMult, 0, Math.PI*2);
+    ctx.fillStyle = glow; ctx.fill();
+
+    // Bubble fill
+    ctx.beginPath();
+    ctx.arc(x, y, bubbleR * ep, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${dotR},${dotG},${dotB},${alpha * 0.85})`; ctx.fill();
+
+    // Bubble border
+    ctx.beginPath();
+    ctx.arc(x, y, bubbleR * ep, 0, Math.PI * 2);
+    ctx.strokeStyle = (isBazinga||isRental) ? `rgba(255,255,255,${edgeFade*0.9})` : `rgba(255,255,255,${edgeFade*0.55})`;
+    ctx.lineWidth = (isBazinga||isRental) ? 2 : 1.5; ctx.stroke();
+
+    // Emoji
+    ctx.font = `${iconSize * ep}px sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+    ctx.fillText(emoji, x, y);
+    ctx.textBaseline = 'alphabetic';
+
+    // Name label
+    {
+      ctx.font = (isBazinga||isRental) ? `700 12px 'DM Sans', sans-serif` : `600 12px 'DM Sans', sans-serif`;
+      ctx.textAlign = 'center';
+      const nameW = ctx.measureText(place.name).width + 16;
+      const nameY = y - bubbleR * ep - 10;
+      ctx.beginPath();
+      ctx.roundRect(x - nameW/2, nameY - 14, nameW, 18, 9);
+      ctx.fillStyle = isBazinga ? `rgba(30,20,0,${edgeFade*0.85})` : isRental ? `rgba(0,30,10,${edgeFade*0.85})` : `rgba(0,0,0,${edgeFade*0.72})`; ctx.fill();
+      ctx.fillStyle = isBazinga ? `rgba(255,214,10,${edgeFade*alpha})` : isRental ? `rgba(52,199,89,${edgeFade*alpha})` : `rgba(255,255,255,${edgeFade*alpha})`;
+      ctx.fillText(place.name, x, nameY);
+    }
+
+    // Distance / price
+    {
+      ctx.font = `500 10px 'DM Sans', sans-serif`; ctx.textAlign = 'center';
+      if(isRental && place.price){
+        ctx.fillStyle=`rgba(52,199,89,${edgeFade*alpha})`;
+        ctx.fillText(place.currency+' '+place.price.toLocaleString()+'/mo', x, y+bubbleR*ep+14);
+      } else {
+        ctx.fillStyle=`rgba(255,255,255,${edgeFade*alpha*0.8})`;
+        ctx.fillText(formatDist(place.dist), x, y+bubbleR*ep+14);
+      }
+    }
+
+    frameDots.push({ place, x, y, r: bubbleR * ep + 18 });
+  }
+
+  if(_shouldRebuildHits(frameDots)){
+    _lastHitDots = frameDots.map(d => ({x:d.x, y:d.y, r:d.r, place:d.place}));
+    rebuildHitTargets();
+  }
+
+  const now4 = Date.now();
+  if(!state._lastRenderLog || now4 - state._lastRenderLog > 4000){
+    state._lastRenderLog = now4;
+    if(state.places.length > 0){
+      dbg('render: ' + frameDots.length + ' dots visible / ' + state.places.length + ' total | compass=' + (state.headingReceived ? 'OK' : 'NO'));
+    }
+  }
+}
+
+function rebuildHitTargets(){
+  const existing = dotLayer.children;
+  while(dotLayer.children.length > frameDots.length){
+    dotLayer.removeChild(dotLayer.lastChild);
+  }
+
+  frameDots.forEach((d, i) => {
+    let el = existing[i];
+    if(!el){
+      el = document.createElement('div');
+      el.className = 'dot-hit';
+      el._openHandler = null;
+      dotLayer.appendChild(el);
+    }
+    const size = Math.max(56, d.r * 2);
+    el.style.left   = d.x + 'px';
+    el.style.top    = d.y + 'px';
+    el.style.width  = size + 'px';
+    el.style.height = size + 'px';
+
+    if(el._place !== d.place){
+      el._place = d.place;
+      const handler = () => openPanel(d.place);
+      el.onclick = handler;
+      el.ontouchend = e => { e.preventDefault(); handler(); };
+    }
+  });
+}
+
+// ─────────────────────────────────────────────
+//  Wikipedia helpers (enhanced)
+// ─────────────────────────────────────────────
+const _cityCache = new Map();
+
+async function getCurrentCity(lat, lon) {
+  const key = `${lat.toFixed(3)},${lon.toFixed(3)}`;
+  if (_cityCache.has(key)) return _cityCache.get(key);
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=14&addressdetails=1`;
+    const res = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+    const data = await res.json();
+    const addr = data.address || {};
+    const city    = addr.city || addr.town || addr.county || '';
+    const suburb  = addr.suburb || addr.neighbourhood || addr.quarter || addr.district || '';
+    const country = addr.country || '';
+    // Must be a plain object — primitives silently drop custom properties
+    const result = {
+      toString()  { return city; },
+      valueOf()   { return city; },
+      _suburb:  suburb,
+      _country: country,
+      _full:    [suburb, city, country].filter(Boolean).join(', '),
+    };
+    _cityCache.set(key, result);
+    return result;
+  } catch(e) {
+    dbg('getCurrentCity error: ' + e.message);
+    return { toString(){ return ''; }, valueOf(){ return ''; }, _suburb:'', _country:'', _full:'' };
+  }
+}
+
+async function fetchWikipediaExtract(placeName, wikitag, tags = {}, city = '') {
+  if (wikitag) {
+    const title = wikitag.replace(/^[a-z]{2}:/, '');
+    const result = await _wikiByTitle(title);
+    if (result) return result;
+  }
+
+  const direct = await _wikiByTitle(placeName);
+  if (direct) return direct;
+
+  const opensearchResults = await _wikiOpensearch(placeName);
+  for (const title of opensearchResults) {
+    const result = await _wikiByTitle(title);
+    if (result && result.extract.length > 100) return result;
+  }
+
+  const category = _getCategoryKeyword(tags);
+  if (category) {
+    const catQuery = `${placeName} ${category}`;
+    const catResults = await _wikiOpensearch(catQuery);
+    for (const title of catResults) {
+      const result = await _wikiByTitle(title);
+      if (result && result.extract.length > 100) return result;
+    }
+  }
+
+  let currentCity = city;
+  if (!currentCity && state.lat && state.lon) {
+    currentCity = await getCurrentCity(state.lat, state.lon);
+  }
+  if (currentCity) {
+    const cityQuery = `${placeName} ${currentCity}`;
+    const cityResults = await _wikiOpensearch(cityQuery);
+    for (const title of cityResults) {
+      const result = await _wikiByTitle(title);
+      if (result && result.extract.length > 100) return result;
+    }
+  }
+
+  try {
+    const srRes = await fetch(
+      'https://en.wikipedia.org/w/api.php?' + new URLSearchParams({
+        action: 'query', list: 'search', srsearch: placeName,
+        srlimit: '3', format: 'json', origin: '*'
+      })
+    );
+    const srData = await srRes.json();
+    const hits = srData.query?.search || [];
+    for (const hit of hits) {
+      const result = await _wikiByTitle(hit.title);
+      if (result && result.extract.length > 100) return result;
+    }
+  } catch (e) { /* silent */ }
+
+  return null;
+}
+
+async function _wikiOpensearch(query) {
+  try {
+    const res = await fetch(
+      'https://en.wikipedia.org/w/api.php?' + new URLSearchParams({
+        action: 'opensearch', search: query, limit: '5',
+        namespace: '0', format: 'json', origin: '*'
+      })
+    );
+    const [, titles] = await res.json();
+    return (titles || []).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function _getCategoryKeyword(tags) {
+  if (tags.amenity) {
+    const map = {
+      restaurant: 'restaurant', cafe: 'café', fast_food: 'fast food',
+      bar: 'bar', fuel: 'petrol station', pharmacy: 'pharmacy',
+      atm: 'ATM', bank: 'bank', marketplace: 'market',
+      place_of_worship: 'mosque'
+    };
+    return map[tags.amenity] || tags.amenity.replace(/_/g, ' ');
+  }
+  if (tags.tourism) {
+    const map = {
+      hotel: 'hotel', motel: 'motel', hostel: 'hostel',
+      attraction: 'attraction', museum: 'museum',
+      viewpoint: 'viewpoint', gallery: 'gallery',
+      zoo: 'zoo', theme_park: 'theme park'
+    };
+    return map[tags.tourism] || tags.tourism.replace(/_/g, ' ');
+  }
+  if (tags.shop) {
+    const map = { supermarket: 'supermarket', mall: 'shopping mall' };
+    return map[tags.shop] || tags.shop.replace(/_/g, ' ');
+  }
+  return null;
+}
+
+async function _wikiByTitle(title) {
+  try {
+    const params = new URLSearchParams({
+      action: 'query', titles: title,
+      prop: 'extracts|info',
+      exintro: '1', explaintext: '1',
+      inprop: 'url', redirects: '1',
+      format: 'json', origin: '*',
+    });
+    const res  = await fetch('https://en.wikipedia.org/w/api.php?' + params);
+    const data = await res.json();
+    const pages = data.query?.pages || {};
+    const page  = Object.values(pages)[0];
+    if (!page || page.missing !== undefined || !page.extract) return null;
+    return {
+      title:   page.title,
+      extract: page.extract.slice(0, 3000),
+      url:     page.fullurl || `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title)}`,
+    };
+  } catch (e) { return null; }
+}
+
+// ─────────────────────────────────────────────
+//  Guide card — Llama via /api/food and /api/heritage
+// ─────────────────────────────────────────────
+function getGuideType(tags){
+  if(tags.tourism && ['attraction','museum','gallery','artwork','viewpoint','zoo','theme_park','aquarium','castle','monument','ruins','heritage','archaeological_site','historic'].includes(tags.tourism)) return 'heritage';
+  if(tags.historic) return 'heritage';
+  if(tags.amenity === 'place_of_worship') return 'heritage';
+  if(tags.amenity === 'restaurant' || tags.amenity === 'cafe' || tags.amenity === 'fast_food' || tags.amenity === 'bar') return 'food';
+  if(tags.tourism === 'hotel' || tags.tourism === 'motel' || tags.tourism === 'hostel' || tags.tourism === 'guest_house' || tags.tourism === 'resort') return 'hotel';
+  if(tags.shop === 'mall' || tags.shop === 'supermarket' || tags.amenity === 'marketplace') return 'shop';
+  if(tags.amenity === 'fuel') return 'fuel';
+  if(tags.amenity === 'pharmacy' || tags.shop === 'pharmacy') return 'pharmacy';
+  if(tags.amenity === 'atm' || tags.amenity === 'bank') return 'bank';
+  return 'general';
+}
+
+function getGuideLabel(type){
+  const labels = {
+    heritage: '✦ Heritage Guide',
+    food:     '🍽 Food Guide',
+    hotel:    '🏨 Stay Guide',
+    shop:     '🛍 Shopping Guide',
+    fuel:     '⛽ Local Guide',
+    pharmacy: '💊 Local Guide',
+    bank:     '🏦 Local Guide',
+    general:  '📍 Place Guide',
+  };
+  return labels[type] || '📍 Place Guide';
+}
+
+function getGuideClass(type){
+  if(type === 'food') return 'food-guide';
+  if(type === 'hotel') return 'hotel-guide';
+  if(type === 'shop') return 'shop-guide';
+  return '';
+}
+
+// Parse "FACT:" lines out of Llama response
+function parseGroqResponse(raw) {
+  if (!raw) return { summary: null, facts: [] };
+  const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+  const facts = [];
+  const summaryLines = [];
+  for (const line of lines) {
+    if (line.startsWith('FACT:')) {
+      facts.push(line.replace(/^FACT:\s*/i, ''));
+    } else if (facts.length === 0) {
+      summaryLines.push(line);
+    }
+  }
+  return { summary: summaryLines.join(' ') || null, facts };
+}
+
+// Render fun-fact chips
+function renderFacts(factsEl, facts, guideType) {
+  factsEl.innerHTML = '';
+  if (!facts || facts.length === 0) return;
+  const icons = {
+    food: ['🍴','💡'], hotel: ['🛎','💡'], heritage: ['🏛','⭐'],
+    shop: ['🛍','💡'], fuel: ['⛽','💡'], pharmacy: ['💊','💡'],
+    bank: ['💳','💡'], general: ['📍','💡'],
+  };
+  const [ic1, ic2] = icons[guideType] || ['📍','💡'];
+  facts.slice(0, 2).forEach((fact, i) => {
+    const div = document.createElement('div');
+    div.className = 'heritage-fact';
+    div.innerHTML = '<span class="heritage-fact-icon">' + (i === 0 ? ic1 : ic2) + '</span><span class="heritage-fact-text">' + fact + '</span>';
+    factsEl.appendChild(div);
+  });
+}
+
+async function loadHeritageGuide(place) {
+  const card     = document.getElementById('heritage-card');
+  const badge    = document.getElementById('guide-badge');
+  const summary  = document.getElementById('heritage-summary');
+  const factsEl  = document.getElementById('heritage-facts');
+  const wikiLink = document.getElementById('heritage-wiki-link');
+  const tags     = place.tags;
+
+  const guideType  = getGuideType(tags);
+  const guideLabel = getGuideLabel(guideType);
+  const guideClass = getGuideClass(guideType);
+
+  card.className = guideClass ? 'visible ' + guideClass : 'visible';
+  badge.textContent = guideLabel;
+  summary.innerHTML = '<div class="heritage-loading"><div class="heritage-spinner"></div>Asking Llama…</div>';
+  factsEl.innerHTML = '';
+  wikiLink.style.display = 'none';
+
+  // Resolve city from GPS
+  let city = '';
+  if (state.lat && state.lon) {
+    city = await getCurrentCity(state.lat, state.lon);
+  }
+
+  try {
+    if (guideType === 'food') {
+      // ── Food: call /api/food (Groq web-search + summary) ──────────────
+      const res = await fetch('/api/food', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ placeName: place.name, city, tags }),
+      });
+      if (!res.ok) throw new Error('food api ' + res.status);
+      const data = await res.json();
+      if (!data.summary) { card.classList.remove('visible'); return; }
+
+      const parsed = parseGroqResponse(data.summary);
+      summary.textContent = parsed.summary || data.summary;
+      renderFacts(factsEl, parsed.facts, guideType);
+
+      const zq = encodeURIComponent(place.name + (city ? ' ' + city : ''));
+      wikiLink.href = 'https://www.zomato.com/search?q=' + zq;
+      wikiLink.textContent = '🍽 View on Zomato →';
+      wikiLink.style.display = 'inline-flex';
+      return;
+    }
+
+    // ── Heritage / hotel / shop / general: fetch Wikipedia then /api/heritage ──
+    const wiki = await fetchWikipediaExtract(place.name, tags.wikipedia, tags, city);
+
+    // For non-heritage types without Wikipedia, still ask Llama with what we know
+    let extract = (wiki && wiki.extract && wiki.extract.length > 80)
+      ? wiki.extract
+      : 'No Wikipedia article found. Use your knowledge about this type of place and location.';
+
+    // Call /api/heritage — it rewrites/summarises the extract tourist-friendly
+    let polishedSummary = wiki ? wiki.extract.split('. ').slice(0, 2).join('. ') + '.' : null;
+    let facts = [];
+
+    try {
+      const aiRes = await fetch('/api/heritage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ placeName: place.name, extract, city }),
+      });
+      if (aiRes.ok) {
+        const aiData = await aiRes.json();
+        if (aiData.summary) {
+          const parsed = parseGroqResponse(aiData.summary);
+          if (parsed.summary) polishedSummary = parsed.summary;
+          facts = parsed.facts;
+        }
+      }
+    } catch (e) { dbg('heritage api: ' + e.message); }
+
+    if (!polishedSummary) { card.classList.remove('visible'); return; }
+
+    summary.textContent = polishedSummary;
+    renderFacts(factsEl, facts, guideType);
+
+    if (wiki && wiki.url) {
+      wikiLink.href = wiki.url;
+      wikiLink.textContent = '📖 Wikipedia →';
+      wikiLink.style.display = 'inline-flex';
+    } else if (guideType === 'hotel') {
+      const bq = encodeURIComponent(place.name + (city ? ' ' + city : ''));
+      wikiLink.href = 'https://www.booking.com/search.html?ss=' + bq;
+      wikiLink.textContent = '🏨 View on Booking.com →';
+      wikiLink.style.display = 'inline-flex';
+    }
+
+  } catch (e) {
+    dbg('Guide error: ' + e.message);
+    card.classList.remove('visible');
+  }
+}
+
+// ─────────────────────────────────────────────
+//  Info panel
+// ─────────────────────────────────────────────
+function openPanel(place){
+  const tags = place.tags;
+
+  if(place.isRental){
+    document.getElementById('panel-category').textContent = '🏠 RENTAL · ' + (place.type||'APARTMENT').toUpperCase();
+    document.getElementById('panel-name').textContent = place.name;
+    document.getElementById('panel-dist').textContent = formatDist(place.dist) + ' away';
+    const tagRow = document.getElementById('panel-tags'); tagRow.innerHTML = '';
+    const addTag = (txt, color) => {
+      const s=document.createElement('span'); s.className='tag';
+      if(color) s.style.cssText=`color:${color};border-color:${color}44;`;
+      s.textContent=txt; tagRow.appendChild(s);
+    };
+    if(place.price)            addTag(place.currency+' '+place.price.toLocaleString()+'/mo','#34C759');
+    if(place.bedrooms!=null)   addTag(place.bedrooms===0?'Studio':place.bedrooms+' BR');
+    if(place.area_sqft)        addTag(place.area_sqft.toLocaleString()+' sqft');
+    if(place.building)         addTag(place.building);
+    const rows=document.getElementById('panel-rows'); rows.innerHTML='';
+    if(place.summary){ const se=document.createElement('div'); se.style.cssText='font-size:14px;line-height:1.65;color:rgba(255,255,255,0.85);padding:10px 0;'; se.textContent=place.summary; rows.appendChild(se); }
+    if(place.url){ const a=document.createElement('a'); a.href=place.url; a.target='_blank'; a.rel='noopener noreferrer'; a.style.cssText='display:inline-flex;align-items:center;gap:5px;margin-top:6px;font-size:12px;color:#34C759;text-decoration:none;'; a.textContent='🔗 View listing →'; rows.appendChild(a); }
+    document.getElementById('heritage-card').classList.remove('visible');
+    infoPanel.classList.add('open');
+    return;
+  }
+
+  if(place.isBazinga){
+    document.getElementById('panel-category').textContent = '⚡ BAZINGA · ' + (place.category||'News').toUpperCase();
+    document.getElementById('panel-name').textContent = place.headline || place.name;
+    document.getElementById('panel-dist').textContent = formatDist(place.dist) + ' away';
+    document.getElementById('panel-tags').innerHTML = '';
+    const cs = document.createElement('span'); cs.className='tag'; cs.textContent=place.category||'News'; document.getElementById('panel-tags').appendChild(cs);
+    const rows = document.getElementById('panel-rows'); rows.innerHTML='';
+    const se = document.createElement('div'); se.style.cssText='font-size:14px;line-height:1.65;color:rgba(255,255,255,0.85);padding:10px 0;'; se.textContent=place.summary||''; rows.appendChild(se);
+    if(place.url){ const a=document.createElement('a'); a.href=place.url; a.target='_blank'; a.rel='noopener noreferrer'; a.style.cssText='display:inline-flex;align-items:center;gap:5px;margin-top:6px;font-size:12px;color:#FFD60A;text-decoration:none;'; a.textContent='🔗 Read full story →'; rows.appendChild(a); }
+    document.getElementById('heritage-card').classList.remove('visible');
+    // directions-btn always visible now
+    infoPanel.classList.add('open');
+    return;
+  }
+
+  document.getElementById('panel-category').textContent =
+    getTypeEmoji(tags) + ' ' + formatCategory(tags).toUpperCase();
+
+  document.getElementById('panel-name').textContent = place.name;
+  document.getElementById('panel-dist').textContent = formatDist(place.dist) + ' away';
+
+  const tagRow = document.getElementById('panel-tags');
+  tagRow.innerHTML = '';
+  const tagList = [];
+  if(tags.amenity)  tagList.push(tags.amenity.replace(/_/g,' '));
+  if(tags.cuisine)  tags.cuisine.split(';').slice(0,3).forEach(c => tagList.push(c.replace(/_/g,' ')));
+  if(tags.outdoor_seating === 'yes') tagList.push('outdoor seating');
+  if(tags.takeaway === 'yes') tagList.push('takeaway');
+  if(tags.delivery === 'yes') tagList.push('delivery');
+  if(tags['diet:vegetarian'] === 'yes') tagList.push('vegetarian');
+  if(tags['diet:vegan'] === 'yes') tagList.push('vegan');
+  tagList.slice(0,5).forEach(t => {
+    const span = document.createElement('span');
+    span.className = 'tag';
+    span.textContent = t;
+    tagRow.appendChild(span);
+  });
+
+  const rows = document.getElementById('panel-rows');
+  rows.innerHTML = '';
+
+  function makeRow(icon, val, isLink){
+    if(!val) return;
+    const row = document.createElement('div');
+    row.className = 'panel-row';
+    const ic = document.createElement('span');
+    ic.className = 'panel-icon';
+    ic.textContent = icon;
+    const vl = document.createElement('span');
+    vl.className = 'panel-val';
+    if(isLink && val instanceof Node){
+      vl.appendChild(val);
+    } else {
+      vl.textContent = val;
+    }
+    row.appendChild(ic); row.appendChild(vl);
+    rows.appendChild(row);
+  }
+
+  // Website — clean display
+  if(tags.website){
+    try {
+      const u = new URL(tags.website);
+      if(u.protocol === 'https:' || u.protocol === 'http:'){
+        const a = document.createElement('a');
+        a.href = u.href; a.target = '_blank'; a.rel = 'noopener noreferrer';
+        a.className = 'panel-link';
+        const display = u.hostname.replace(/^www\./, '');
+        a.textContent = display.length > 32 ? display.slice(0,32)+'…' : display;
+        makeRow('🌐', a, true);
+      }
+    } catch(_){}
+  }
+
+  const phone = tags.phone || tags['contact:phone'];
+  if(phone){
+    const a = document.createElement('a');
+    a.href = 'tel:' + phone.replace(/\s/g,'');
+    a.className = 'panel-link';
+    a.textContent = phone;
+    makeRow('📞', a, true);
+  }
+
+  makeRow('🕐', tags.opening_hours || null);
+
+  const addr = [tags['addr:street'], tags['addr:housenumber']].filter(Boolean).join(' ');
+  makeRow('📍', addr || null);
+
+  const perks = [];
+  if(tags.wheelchair === 'yes') perks.push('Wheelchair ✓');
+  if(tags.wifi === 'yes' || tags.internet_access === 'wlan') perks.push('WiFi ✓');
+  if(tags.takeaway === 'yes') perks.push('Takeaway');
+  if(tags.delivery === 'yes') perks.push('Delivery');
+  if(perks.length) makeRow('✨', perks.join(' · '));
+
+  loadHeritageGuide(place);
+
+  // Directions button
+  const dirBtn = document.getElementById('directions-btn');
+  dirBtn.onclick = () => {
+    const url = 'https://www.google.com/maps/dir/?api=1&destination=' + place.lat + ',' + place.lon + '&travelmode=walking';
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  // Share button
+  const shareBtn = document.getElementById('share-btn');
+  shareBtn.onclick = async () => {
+    const text = place.name + ' — ' + formatDist(place.dist) + ' away';
+    const url = 'https://www.google.com/maps/search/?api=1&query=' + place.lat + ',' + place.lon;
+    if(navigator.share){
+      try { await navigator.share({ title: place.name, text, url }); } catch(_) {}
+    } else {
+      try { await navigator.clipboard.writeText(text + '\n' + url); showErrorToast('📋 Copied to clipboard'); } catch(_) {}
+    }
+  };
+
+  // Maps link
+  const mapsBtn = document.getElementById('maps-btn');
+  mapsBtn.href = 'https://www.google.com/maps/search/?api=1&query=' + place.lat + ',' + place.lon;
+
+  infoPanel.classList.add('open');
+}
+
+document.getElementById('close-panel').addEventListener('click', () => {
+  infoPanel.classList.remove('open');
+});
+
+let panelStartY = 0;
+infoPanel.addEventListener('touchstart', e => { panelStartY = e.touches[0].clientY; }, {passive:true});
+infoPanel.addEventListener('touchend', e => {
+  if(e.changedTouches[0].clientY - panelStartY > 60) infoPanel.classList.remove('open');
+}, {passive:true});
+
+// ─────────────────────────────────────────────
+//  Buttons
+// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────
+//  Splash button wiring  (Issues 1 & 3)
+//  start-btn: calls requestPermission() as the
+//  ONLY synchronous action — zero awaits before
+//  it, so iOS keeps the user-gesture token alive.
+//  demo-btn: guarded against double-fire by a
+//  flag so a scroll-tap can't trigger it twice.
+// ─────────────────────────────────────────────
+(function(){
+  var startBtn = document.getElementById('start-btn');
+  var demoBtn  = document.getElementById('demo-btn');
+  var launched = false; // prevents double-launch from either button
+
+  startBtn.addEventListener('click', function onStartClick(){
+    if(launched) return;
+
+    // HTTPS guard — synchronous, no await, safe to check first
+    if(location.protocol !== 'https:' && location.hostname !== 'localhost'){
+      launched = true;
+      splash.style.display = 'none';
+      var msg = document.createElement('div');
+      msg.style.cssText = 'position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:40px;text-align:center;background:#0a0a0c;z-index:200;';
+      msg.innerHTML = '<div style="font-size:40px">🔒</div><div style="font-size:18px;font-weight:600">HTTPS required</div><div style="font-size:14px;color:rgba(255,255,255,0.5);max-width:280px">Camera, GPS, and compass only work on secure (HTTPS) connections.</div>';
+      document.body.appendChild(msg);
+      return;
+    }
+
+    // iOS 13+ DeviceOrientationEvent permission MUST be called synchronously
+    // inside the gesture handler — no await before this call.
+    if(typeof DeviceOrientationEvent !== 'undefined' &&
+       typeof DeviceOrientationEvent.requestPermission === 'function'){
+      launched = true;
+      var permPromise;
+      try { permPromise = DeviceOrientationEvent.requestPermission(); }
+      catch(e){ permPromise = Promise.reject(e); }
+      permPromise
+        .then(function(perm){
+          dbg('orientation permission: ' + perm);
+          if(perm === 'granted'){
+            registerOrientationListeners();
+            state.permOrientation = true;
+            setInterval(registerOrientationListeners, 10000);
+          } else {
+            dbg('compass: permission denied — radar mode only');
+          }
+        })
+        .catch(function(err){ dbg('compass permission error: ' + (err && err.message)); })
+        .finally(function(){ launchApp(); });
+    } else {
+      // Non-iOS: no permission prompt needed, launch directly
+      launched = true;
+      launchApp();
+    }
+  });
+
+  demoBtn.addEventListener('click', function onDemoClick(e){
+    // Prevent accidental double-fire from scroll momentum taps
+    if(launched) return;
+    launched = true;
+    startDemo();
+  }, { passive: false });
+})();
+
+async function fetchRentalPlaces(lat, lon) {
+  try {
+    const cityResult = await getCurrentCity(lat, lon);
+    const city    = String(cityResult);
+    const suburb  = cityResult._suburb  || '';
+    const country = cityResult._country || '';
+    const locality = [suburb, city].filter(Boolean).join(', ');
+    dbg('Rentals► loc="' + locality + '" suburb="' + suburb + '" country="' + country + '"');
+    const payload = { lat, lon, city, suburb, country };
+    dbg('Rentals► POST /api/rentals ' + JSON.stringify(payload).slice(0, 120));
+    const res = await fetch('/api/rentals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    dbg('Rentals► HTTP ' + res.status + ' ' + res.statusText);
+    if(!res.ok){
+      const errText = await res.text().catch(()=>'');
+      dbg('Rentals► error body: ' + errText.slice(0,200));
+      return;
+    }
+    const data = await res.json();
+    dbg('Rentals► response keys: ' + Object.keys(data).join(', '));
+    if(data._debug) data._debug.forEach(line => dbg('SRV: ' + line));
+    if(!data.listings || !data.listings.length){
+      dbg('Rentals► 0 listings — raw: ' + JSON.stringify(data).slice(0,300));
+      return;
+    }
+    dbg('Rentals► got ' + data.listings.length + ' listings');
+    // Spread rental coords if Llama placed them all at the same point
+    const SPREAD = 0.0015; // ~150m spread radius
+    state.rentalPlaces = data.listings.map((l,i) => {
+      const angle = (i / data.listings.length) * 2 * Math.PI;
+      const jitterLat = l.lat === data.listings[0].lat ? Math.cos(angle) * SPREAD * (0.5 + i*0.3) : 0;
+      const jitterLon = l.lon === data.listings[0].lon ? Math.sin(angle) * SPREAD * (0.5 + i*0.3) : 0;
+      return {
+        ...l, id: l.id||'rent_'+i, isRental: true, tags: {},
+        lat: l.lat + jitterLat,
+        lon: l.lon + jitterLon,
+        dist: haversine(lat, lon, l.lat + jitterLat, l.lon + jitterLon),
+      };
+    });
+    dbg('Rentals► loaded ' + state.rentalPlaces.length + ' places');
+    state.rentalPlaces.forEach((r,i) => dbg('RENT['+i+'] '+r.currency+' '+r.price+'/mo dist='+Math.round(r.dist)+'m "'+r.name.slice(0,24)+'"'));
+    const _onlyBz=state_filters.has('bazinga')&&state_filters.size===1;
+    const _onlyRent=state_filters.has('rentals')&&state_filters.size===1;
+    placeCount.textContent =
+      ((_onlyBz||_onlyRent)?0:state.places.filter(placePassesFilter).length) +
+      (state_filters.has('all')||state_filters.has('bazinga')?state.bazingaPlaces.length:0) +
+      (state_filters.has('all')||state_filters.has('rentals')?state.rentalPlaces.length:0);
+  } catch(e){ dbg('fetchRentalPlaces: '+e.message); }
+}
+
+async function fetchBazingaPlaces(lat, lon) {
+  try {
+    const cityResult = await getCurrentCity(lat, lon);
+    const city    = String(cityResult);
+    const suburb  = cityResult._suburb  || '';
+    const country = cityResult._country || '';
+    const locality = [suburb, city].filter(Boolean).join(', ');
+    dbg('Bazinga► loc="' + locality + '" suburb="' + suburb + '" country="' + country + '"');
+    const payload = { lat, lon, city };
+    dbg('Bazinga► POST /api/bazinga ' + JSON.stringify(payload).slice(0, 120));
+    const res = await fetch('/api/bazinga', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    dbg('Bazinga► HTTP ' + res.status + ' ' + res.statusText);
+    if(!res.ok){
+      const errText = await res.text().catch(()=>'');
+      dbg('Bazinga► error body: ' + errText.slice(0, 200));
+      return;
+    }
+    const data = await res.json();
+    dbg('Bazinga► response keys: ' + Object.keys(data).join(', '));
+    if(data._debug) data._debug.forEach(line => dbg('SRV: ' + line));
+    if(!Array.isArray(data.spots) || !data.spots.length){
+      dbg('Bazinga► 0 spots — raw: ' + JSON.stringify(data).slice(0, 300));
+      return;
+    }
+    dbg('Bazinga► got ' + data.spots.length + ' spots');
+    state.bazingaPlaces = data.spots.map((s,i) => ({
+      id: 'bz_'+i, isBazinga: true,
+      name: s.name || s.headline || 'Local Update',
+      headline: s.headline || s.name,
+      summary: s.summary || '',
+      category: s.category || 'News',
+      url: s.url || null,
+      lat: s.lat, lon: s.lon,
+      dist: haversine(lat, lon, s.lat, s.lon),
+      tags: {},
+    }));
+    dbg('Bazinga► loaded ' + state.bazingaPlaces.length + ' spots');
+    state.bazingaPlaces.forEach((s,i) => dbg('BZ['+i+'] cat='+s.category+' dist='+Math.round(s.dist)+'m date='+(s.date||'null')+' "'+s.name.slice(0,28)+'"'));
+  } catch(e) { dbg('fetchBazingaPlaces: ' + e.message + (e.stack ? '\n'+e.stack.slice(0,200) : '')); }
+}
+
+try {
+  Object.keys(sessionStorage).filter(k => k.startsWith('arplaces_') && !k.startsWith('arplaces_v')).forEach(k => sessionStorage.removeItem(k));
+} catch(_) {}
+
+// Debug toggle
+(function(){
+  const btn = document.getElementById('debug-toggle');
+  const panel = document.getElementById('debug-panel');
+  btn.addEventListener('click', function(){
+    const visible = panel.style.display !== 'none';
+    panel.style.display = visible ? 'none' : 'block';
+    btn.textContent = visible ? '🔍 Debug' : '❌ Close';
+  });
+})();
+
+let currentRadius = MAX_DIST;
+refreshBtn.addEventListener('click', async () => {
+  if(state.demoMode) return;
+  if(fetchInFlight){ dbg('Refresh: fetch already in flight'); return; }
+  if(fetchRetryTimer !== null){ clearTimeout(fetchRetryTimer); fetchRetryTimer = null; }
+  // Clear session cache so we always get fresh data on manual refresh
+  try {
+    Object.keys(sessionStorage)
+      .filter(k => k.startsWith('arplaces_'))
+      .forEach(k => sessionStorage.removeItem(k));
+  } catch(_){}
+  _retryCount = 0; // reset backoff
+  if(state.lat !== null){
+    dbg('Manual refresh triggered');
+    fetchPlaces(state.lat, state.lon);
+  } else {
+    dbg('Refresh: GPS not available yet');
+    statusPill.textContent = '⚠️ Waiting for GPS…';
+  }
+});
+
+// ─────────────────────────────────────────────
+//  roundRect polyfill (fallback)
+// ─────────────────────────────────────────────
+if(!CanvasRenderingContext2D.prototype.roundRect){
+  CanvasRenderingContext2D.prototype.roundRect = function(x,y,w,h,r){
+    this.moveTo(x+r, y);
+    this.lineTo(x+w-r, y);
+    this.quadraticCurveTo(x+w, y, x+w, y+r);
+    this.lineTo(x+w, y+h-r);
+    this.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+    this.lineTo(x+r, y+h);
+    this.quadraticCurveTo(x, y+h, x, y+h-r);
+    this.lineTo(x, y+r);
+    this.quadraticCurveTo(x, y, x+r, y);
+    this.closePath();
+  };
+}
+</script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+</body>
+</html>
